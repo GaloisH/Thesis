@@ -1,0 +1,13 @@
+
+# 忽略所有数据集文件
+datasets/
+# 忽略训练产生的大文件
+models/*.pth
+models/*.pt
+outputs/
+*.log
+# 忽略系统与环境文件
+__pycache__/
+.venv/
+.vscode/
+.DS_Storedata
