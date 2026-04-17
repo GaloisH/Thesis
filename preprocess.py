@@ -1,51 +1,58 @@
-from torch.utils.data import Dataset, DataLoader
-import nibabel as nib
 import os
-import cv2
+import glob
 import numpy as np
+import nibabel as nib
+import cv2
+from torch.utils.data import Dataset, DataLoader
 
-def get_files(path):
-    images=[]
-    masks=[]
-    for dirpath in os.listdir(path):
-        for file in os.listdir(os.path.join(path,dirpath)):
-            if file.endswith('_t1ce.nii'):
-                image_path=os.path.join(path,dirpath,file)
-                images.append(image_path)
-            elif file.endswith('_seg.nii'):
-                mask_path=os.path.join(path,dirpath,file)
-                masks.append(mask_path)
-
+def get_paired_files(data_dir):
+    """获取匹配的图像和掩码文件路径"""
+    # 使用glob加速文件搜索，并保证路径匹配
+    masks = sorted(glob.glob(os.path.join(data_dir, '**', '*_seg.nii'), recursive=True))
+    images = [m.replace('_seg.nii', '_t1ce.nii') for m in masks]
     return images, masks
 
-
-def get_image(image_path):
-    img=nib.load(image_path)
-    data = img.get_fdata(dtype=np.float32)
-    return data
-
-def get_slice(n,image_path):
-    data = get_image(image_path)[:,:,n]  # 正确的切片语法
-    data_uint8 = ((data - data.min()) / (data.max() - data.min()) * 255).astype(np.uint8)
-    cv2.imshow(f"Slice:{n}",data_uint8)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-class MeningitsisDataset(Dataset):
-    def __init__(self,images,masks,transform=None):
-        self.images = images
-        self.masks = masks
+class MeningiomaDataset(Dataset):
+    def __init__(self, data_dir, transform=None):
+        self.images, self.masks = get_paired_files(data_dir)
         self.transform = transform
 
     def __len__(self):
         return len(self.images)
     
-    def __getitem__(self,idx):
-        image=self.images[idx]
-        mask=self.masks[idx]
-        return image,mask
+    def __getitem__(self, idx):
+        # 动态读取NIfTI文件并转为数组，减少内存占用
+        image_data = nib.load(self.images[idx]).get_fdata(dtype=np.float32)
+        mask_data = nib.load(self.masks[idx]).get_fdata(dtype=np.float32)
+        
+        img_min, img_max = image_data.min(), image_data.max()
+        if img_max > img_min:
+            image_data = (image_data - img_min) / (img_max - img_min)
 
-if __name__=='__main__':
-    path=r"D:\python_code\projects\thesis\datasets\raw\BraTS2020_TrainingData\MICCAI_BraTS2020_TrainingData\BraTS20_Training_001\BraTS20_Training_001_seg.nii" 
-#    get_image(path)
-    get_slice(64,path)
+        if self.transform:
+            image_data = self.transform(image_data)
+            mask_data = self.transform(mask_data)
+            
+        # 增加通道维度以适配PyTorch (C, H, W, D)
+        image_data = np.expand_dims(image_data, axis=0)
+        mask_data = np.expand_dims(mask_data, axis=0)
+
+        return image_data, mask_data
+
+def visualize_slice(volume_path, slice_idx=64):
+    """可视化指定切片的实用工具"""
+    data = nib.load(volume_path).get_fdata(dtype=np.float32)
+    slice_data = data[:, :, slice_idx]
+    
+    slice_data_uint8 = cv2.normalize(slice_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    
+    cv2.imshow(f"Slice:{slice_idx}", slice_data_uint8)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    dataset=MeningiomaDataset(data_dir=r"D:\python_code\projects\thesis\datasets\raw\BraTS2020_TrainingData")
+    print(len(dataset))
+    # test_path = r"D:\python_code\projects\thesis\datasets\raw\BraTS2020_TrainingData\MICCAI_BraTS2020_TrainingData\BraTS20_Training_001\BraTS20_Training_001_seg.nii"
+    # if os.path.exists(test_path):
+    #     visualize_slice(test_path, slice_idx=64)
