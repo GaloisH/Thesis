@@ -1,6 +1,7 @@
 
 # 忽略所有数据集文件
 AGENTS.md
+.opencode/
 datasets/
 # 忽略训练产生的大文件
 models/*.pth
