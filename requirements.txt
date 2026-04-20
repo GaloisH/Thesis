@@ -1,0 +1,9 @@
+# Core Deep Learning & Medical Imaging framework
+torch>=2.0.0
+torchvision>=0.15.0
+nnunetv2
+
+# Image Processing & Data Loading
+numpy
+nibabel
+opencv-python-headless
