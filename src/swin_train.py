@@ -6,6 +6,7 @@ from monai.networks.nets import SwinUNETR
 from monai.data import Dataset, DataLoader
 import os
 import wandb
+
 wandb.init(
     project="swinunetr",
     name="swinunetr_100epochs",
@@ -21,11 +22,17 @@ wandb.init(
         "use_checkpoint": True
     }
 )
-def get_data(path, plan_path):
-    images = sorted(glob.glob(os.path.join(path, "imagesTr", "*.nii.gz")))
+
+def train(path, plan_path):
+    modality=["t1", "t1ce", "t2", "flair"]
+    images_t1 = sorted(glob.glob(os.path.join(path, "imagesTr", "*0.nii.gz")))
+    images_t1ce = sorted(glob.glob(os.path.join(path, "imagesTr", "*1.nii.gz")))
+    images_t2 = sorted(glob.glob(os.path.join(path, "imagesTr", "*2.nii.gz")))
+    images_flair = sorted(glob.glob(os.path.join(path, "imagesTr", "*3.nii.gz")))
     masks = sorted(glob.glob(os.path.join(path, "labelsTr", "*.nii.gz")))
+    data_dicts={"image": [images_t1, images_t1ce, images_t2, images_flair],
+                 "label": masks}
     
-    data_dicts = [{"image": img, "label": mask} for img, mask in zip(images, masks)]
     
     train_transform, val_transform = build_transforms_from_plan(plan_path)
     
@@ -42,7 +49,7 @@ def get_data(path, plan_path):
     
     # 降低 feature_size 从 48 到 24 进一步节省显存
     model = SwinUNETR(
-        in_channels=1,
+        in_channels=4,
         out_channels=3,
         feature_size=24,
         use_checkpoint=True,
@@ -57,7 +64,6 @@ def get_data(path, plan_path):
     ).to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
-    scaler = torch.cuda.amp.GradScaler() # 添加 AMP 混合精度训练以降低显存占用
     epochs = 50
     epoch_losses = []
     for epoch in range(epochs):
@@ -70,15 +76,12 @@ def get_data(path, plan_path):
             labels = batch_data["label"].to(device)
             optimizer.zero_grad()
             
-            # 开启混合精度前向计算
-            with torch.cuda.amp.autocast():
-                outputs = model(inputs)
-                loss = loss_fn(outputs, labels)
+            outputs = model(inputs)
+            loss = loss_fn(outputs, labels)
             
             # 使用 scaler 缩放并反向传播
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            loss.backward()
+            optimizer.step()
             
             epoch_loss += loss.item()
             epoch_len = len(train_ds) // train_loader.batch_size
@@ -92,5 +95,5 @@ def get_data(path, plan_path):
 if __name__ == "__main__":
     plan_path = r"D:\python_code\projects\thesis\datasets\nnUNet_preprocessed\Dataset101_Meningioma\nnUNetPlans.json"
     path = r"D:\python_code\projects\thesis\datasets\nnUNet_raw\Dataset101_Meningioma"
-    get_data(path, plan_path)
+    train(path, plan_path)
 

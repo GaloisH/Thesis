@@ -34,7 +34,7 @@ echo "   nnUNet_results      = ${nnUNet_results}"
 
 echo ""
 echo "=============================================="
-echo "阶段 2: 启动网络训练 (Training)"
+echo "启动网络训练 (Training)"
 echo "=============================================="
 echo ">> 执行命令: nnUNetv2_train ${TASK_ID} 3d_fullres 0"
 nnUNetv2_train "$TASK_ID" 3d_fullres 0 -tr nnUNetTrainer_100Epochs

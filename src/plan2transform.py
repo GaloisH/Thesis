@@ -25,6 +25,34 @@ from monai.transforms import (
     ToTensord,
 )
 
+from monai.transforms import MapTransform
+import torch
+
+import torch
+from monai.transforms import MapTransform
+
+class ConvertToBratsRegionsd(MapTransform):
+    """
+    根据给定的 dataset.json 逻辑将 1,2,3 标签转换为 3 个二值化通道:
+    - WT (Whole Tumor):[1, 2, 3]
+    - TC (Tumor Core): [2, 3]
+    - ET (Enhancing Tumor): 3
+    """
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            label = d[key] 
+            
+            wt = (label == 1) | (label == 2) | (label == 3)
+            
+            tc = (label == 2) | (label == 3)
+            
+            et = (label == 3)
+            
+            d[key] = torch.cat([wt, tc, et], dim=0).float()
+            
+        return d
+
 def _parse_plan(plan_path: str | Path) -> dict:
     with open(plan_path, "r", encoding="utf-8") as f:
         plan = json.load(f)
@@ -63,6 +91,7 @@ def build_transforms_from_plan(
     base_transforms = [
         LoadImaged(keys=keys),
         EnsureChannelFirstd(keys=keys),
+        ConvertToBratsRegionsd(keys=[label_key]),  # 添加标签转换
         Orientationd(keys=keys, axcodes="RAS"),
         Spacingd(
             keys=keys,
