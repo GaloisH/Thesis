@@ -21,8 +21,9 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
     imagesTr = os.path.join(task_dir, "imagesTr")
     labelsTr = os.path.join(task_dir, "labelsTr")
     imagesTs = os.path.join(task_dir, "imagesTs")
+    labelsTs = os.path.join(task_dir, "labelsTs")
 
-    for p in [imagesTr, labelsTr, imagesTs]:
+    for p in [imagesTr, labelsTr, imagesTs, labelsTs]:
         os.makedirs(p, exist_ok=True)
 
     train_case_dirs = collect_case_dirs(data_dir, "Training")
@@ -57,7 +58,6 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
 
         if not os.path.exists(out_label):
             mask_nii = nib.load(mask_path)
-            # 将标签值 4 合并到 3，保持与 BraTS 常见标签定义一致。
             mask_data = mask_nii.get_fdata()
             mask_data[mask_data == 4] = 3
             new_mask = nib.Nifti1Image(
@@ -72,14 +72,15 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
     test_cases = 0
     for case_dir in tqdm(val_case_dirs, desc="Validation"):
         case_name = os.path.basename(case_dir)
+        mask_path = os.path.join(case_dir, f"{case_name}_seg.nii")
         image_paths = {
             m: os.path.join(case_dir, f"{case_name}_{m}.nii")
             for m in modalities
         }
 
-        missing_files = [p for p in image_paths.values() if not os.path.exists(p)]
+        missing_files = [p for p in [mask_path, *image_paths.values()] if not os.path.exists(p)]
         if missing_files:
-            print(f"警告：验证样本缺少模态文件 {missing_files}，已跳过该样本。")
+            print(f"警告：验证样本缺少文件 {missing_files}，已跳过该样本。")
             continue
 
         case_id = f"test_{test_cases:03d}"
@@ -87,6 +88,16 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
             out_img = os.path.join(imagesTs, f"{case_id}_{channel_idx:04d}.nii.gz")
             if not os.path.exists(out_img):
                 nib.save(nib.load(image_paths[modality]), out_img)
+
+        out_label = os.path.join(labelsTs, f"{case_id}.nii.gz")
+        if not os.path.exists(out_label):
+            mask_nii = nib.load(mask_path)
+            mask_data = mask_nii.get_fdata()
+            mask_data[mask_data == 4] = 3
+            new_mask = nib.Nifti1Image(
+                mask_data.astype(np.uint8), mask_nii.affine, mask_nii.header
+            )
+            nib.save(new_mask, out_label)
 
         test_cases += 1
 
