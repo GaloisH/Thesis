@@ -78,9 +78,9 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
             for m in modalities
         }
 
-        missing_files = [p for p in [mask_path, *image_paths.values()] if not os.path.exists(p)]
+        missing_files = [p for p in image_paths.values() if not os.path.exists(p)]
         if missing_files:
-            print(f"警告：验证样本缺少文件 {missing_files}，已跳过该样本。")
+            print(f"警告：验证样本缺少模态文件 {missing_files}，已跳过该样本。")
             continue
 
         case_id = f"test_{test_cases:03d}"
@@ -90,7 +90,7 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
                 nib.save(nib.load(image_paths[modality]), out_img)
 
         out_label = os.path.join(labelsTs, f"{case_id}.nii.gz")
-        if not os.path.exists(out_label):
+        if os.path.exists(mask_path) and not os.path.exists(out_label):
             mask_nii = nib.load(mask_path)
             mask_data = mask_nii.get_fdata()
             mask_data[mask_data == 4] = 3
@@ -98,6 +98,8 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
                 mask_data.astype(np.uint8), mask_nii.affine, mask_nii.header
             )
             nib.save(new_mask, out_label)
+        elif not os.path.exists(mask_path):
+            print(f"警告：验证样本 {case_name} 缺少标签文件 {mask_path}，仅保存 imagesTs。")
 
         test_cases += 1
 
@@ -106,11 +108,10 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
         "channel_names": {"0": "T1", "1": "T1ce", "2": "T2", "3": "Flair"},
         "labels": {
             "background": 0,
-            "whole_tumor": [1, 2, 3],
-            "tumor_core": [2, 3],
+            "necrotic": 1,
+            "edema": 2,
             "enhancing_tumor": 3,
         },
-        "regions_class_order": [1, 2, 3],
         "numTraining": valid_cases,
         "file_ending": ".nii.gz",
     }

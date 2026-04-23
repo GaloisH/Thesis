@@ -28,10 +28,11 @@ import torch
 
 class ConvertToBratsRegionsd(MapTransform):
     """
-    将单通道整数 label (1/2/3) 转换为 3 个二值化通道:
-      - ch0 WT (Whole Tumor) : label ∈ {1, 2, 3}
-      - ch1 TC (Tumor Core)  : label ∈ {2, 3}
-      - ch2 ET (Enhancing)   : label == 3
+        将单通道整数 label (0/1/2/3) 转换为 4 个互斥 one-hot 通道:
+            - ch0 background       : label == 0
+            - ch1 necrotic         : label == 1
+            - ch2 edema            : label == 2
+            - ch3 enhancing_tumor  : label == 3
 
     必须在所有空间变换和随机裁剪完成后调用，
     因为 RandCropByPosNegLabeld 需要单通道整数 label。
@@ -40,10 +41,11 @@ class ConvertToBratsRegionsd(MapTransform):
         d = dict(data)
         for key in self.keys:
             label = d[key]          # shape: (1, D, H, W), dtype: int/float
-            wt = (label == 1) | (label == 2) | (label == 3)
-            tc = (label == 2) | (label == 3)
-            et = (label == 3)
-            d[key] = torch.cat([wt, tc, et], dim=0).float()   # (3, D, H, W)
+            bg = (label == 0)
+            necrotic = (label == 1)
+            edema = (label == 2)
+            enhancing = (label == 3)
+            d[key] = torch.cat([bg, necrotic, edema, enhancing], dim=0).float()   # (4, D, H, W)
         return d
 
 
@@ -107,7 +109,7 @@ def build_transforms_from_plan(
     # ------------------------------------------------------------------
     # train_transforms:
     #   空间 pad → 随机裁剪（label 仍是单通道整数，采样逻辑正确）
-    #   → ConvertToBratsRegionsd（裁剪完成后再转多通道）
+    #   → ConvertToBratsRegionsd（裁剪完成后再转互斥 one-hot）
     #   → 数据增强 → ToTensor
     # ------------------------------------------------------------------
     train_transforms = Compose(
@@ -123,7 +125,7 @@ def build_transforms_from_plan(
                 image_key=image_key,
                 image_threshold=0,
             ),
-            # 空间变换完成后，将整数 label 转为 BraTS 三区域多通道二值图
+            # 空间变换完成后，将整数 label 转为 4 通道互斥 one-hot
             ConvertToBratsRegionsd(keys=[label_key]),
             RandFlipd(keys=keys, prob=0.5, spatial_axis=0),
             RandFlipd(keys=keys, prob=0.5, spatial_axis=1),
@@ -137,7 +139,7 @@ def build_transforms_from_plan(
 
     # ------------------------------------------------------------------
     # val_transforms:
-    #   不做随机裁剪；转换区域标签后直接 ToTensor
+    #   不做随机裁剪与额外 pad；转换互斥 one-hot 标签后直接 ToTensor
     # ------------------------------------------------------------------
     val_transforms = Compose(
         base_transforms + [
