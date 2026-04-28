@@ -10,7 +10,7 @@ from monai.data.utils import pad_list_data_collate
 from monai.networks.nets import SwinUNETR
 from monai.inferers import sliding_window_inference
 
-from plan2transform import build_transforms_from_plan
+from projects.thesis.src.segmentation.plan2transform import build_transforms_from_plan
 
 
 DEFAULT_CONFIG = {

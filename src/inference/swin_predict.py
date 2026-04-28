@@ -7,7 +7,7 @@ import numpy as np
 
 # 添加 src 到环境变量，以便引入 plan2transform
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from plan2transform import _parse_plan
+from projects.thesis.src.segmentation.plan2transform import _parse_plan
 
 import monai
 from monai.transforms import (

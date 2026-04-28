@@ -4,6 +4,7 @@ AGENTS.md
 .opencode/
 datasets/
 wandb/
+datasetsregistration/
 # 忽略训练产生的大文件
 models/*.pth
 models/*.pt
