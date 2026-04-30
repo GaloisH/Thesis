@@ -1,8 +1,3 @@
-"""
-nnunet_to_monai_transforms.py
-Reads nnUNetPlans.json to automatically extract 3d_fullres configurations
-and returns (train_transforms, val_transforms) MONAI Compose objects.
-"""
 import json
 from pathlib import Path
 from typing import Tuple
@@ -89,7 +84,6 @@ def build_transforms_from_plan(
     #      不做 percentile 0-1 缩放（那会与 Z-score 叠加，偏离 nnUNet 方案）
     # ------------------------------------------------------------------
     base_transforms = [
-        # image: 4 个路径 → (4, D, H, W)；label: 1 个路径 → (1, D, H, W)
         LoadImaged(keys=keys, image_only=True, ensure_channel_first=True),
         Orientationd(keys=keys, axcodes="RAS"),
         Spacingd(
@@ -98,11 +92,10 @@ def build_transforms_from_plan(
             mode=(p["interp_image"], p["interp_label"]),
         ),
         CropForegroundd(keys=keys, source_key=image_key, allow_smaller=True),
-        # nnUNet ZScoreNormalization: (x - mean) / std，仅在非零前景体素上统计
         NormalizeIntensityd(
             keys=[image_key],
-            nonzero=p["use_mask_for_norm"],   # True → 只用前景体素的 mean/std
-            channel_wise=True,                 # 4 个模态分别归一化
+            nonzero=p["use_mask_for_norm"],   
+            channel_wise=True,             
         ),
     ]
 
@@ -121,7 +114,7 @@ def build_transforms_from_plan(
                 spatial_size=p["patch_size"],
                 pos=1,
                 neg=1,
-                num_samples=p["batch_size"],   # 每张图随机采 batch_size 个 patch
+                num_samples=p["batch_size"],   
                 image_key=image_key,
                 image_threshold=0,
             ),
@@ -152,7 +145,7 @@ def build_transforms_from_plan(
 
 
 if __name__ == "__main__":
-    plan_path = r"D:\python_code\projects\thesis\datasets\nnUNet_preprocessed\Dataset101_Meningioma\nnUNetPlans.json"
+    plan_path = ""
     train_t, val_t = build_transforms_from_plan(plan_path)
     print("Train Transforms:")
     print(train_t)

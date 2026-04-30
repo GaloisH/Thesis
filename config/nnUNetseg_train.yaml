@@ -1,0 +1,17 @@
+# nnUNet segmentation training configuration
+# Usage: python src/segmentation/nnunet_train.py [--config config/nnUNetseg_train.yaml]
+
+task_id: "101"
+task_name: "Meningioma"
+trainer: "nnUNetTrainer_100Epochs"
+config: "3d_fullres"
+fold: 0
+
+# Paths — relative to project root, or set absolute paths
+root_dir: "./datasets"
+
+# Wandb logging
+wandb:
+  enabled: true
+  project: "nnUNet_Meningioma"
+  name_prefix: "Task101_3d_fullres_fold0"

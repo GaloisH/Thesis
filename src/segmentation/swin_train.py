@@ -10,7 +10,8 @@ from monai.data.utils import pad_list_data_collate
 from monai.networks.nets import SwinUNETR
 from monai.inferers import sliding_window_inference
 
-from projects.thesis.src.segmentation.plan2transform import build_transforms_from_plan
+from plan2transform import build_transforms_from_plan
+import argparse
 
 
 DEFAULT_CONFIG = {
@@ -263,8 +264,14 @@ def train(path: str, plan_path: str):
 
     wandb.finish()
 
+def main():
+    parser=argparse.ArgumentParser(description="Train SwinUNETR for brain tumor segmentation")
+    parser.add_argument("--config", type=str, default="")
+    args = parser.parse_args()
+    processed_dir = args.processed_dir
+    plan_path=os.join(processed_dir, "Dataset101_Meningioma", "nnUNetPlans.json")
+    path=os.join(processed_dir, "Dataset101_Meningioma")
+    train(path, plan_path)
 
 if __name__ == "__main__":
-    plan_path = r"/root/autodl-tmp/Thesis/datasets/nnUNet_preprocessed/Dataset101_Meningioma/nnUNetPlans.json"
-    path      = r"/root/autodl-tmp/Thesis/datasets/nnUNet_raw/Dataset101_Meningioma"
-    train(path, plan_path)
+    main()

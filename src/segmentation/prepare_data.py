@@ -4,19 +4,25 @@ import json
 import nibabel as nib
 import numpy as np
 from tqdm import tqdm
+import argparse
 
 
 def collect_case_dirs(data_dir, split_name):
+    """
+    收集指定分割名称下的所有病例目录。
+    """
     pattern = os.path.join(data_dir, "**", f"BraTS20_{split_name}_*")
     return sorted(p for p in glob.glob(pattern, recursive=True) if os.path.isdir(p))
 
 
 def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma"):
+    """
+    将原始 BraTS 数据转换为 nnUNetv2 需要的目录结构和文件命名格式。
+    """
     dataset_name = f"Dataset{task_id:03d}_{task_name}"
     nnunet_raw = os.environ.get("nnUNet_raw", os.path.join(output_dir, "nnUNet_raw"))
     modalities = ["t1", "t1ce", "t2", "flair"]
 
-    # 创建 nnUNetv2 目录结构
     task_dir = os.path.join(nnunet_raw, dataset_name)
     imagesTr = os.path.join(task_dir, "imagesTr")
     labelsTr = os.path.join(task_dir, "labelsTr")
@@ -34,6 +40,7 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
 
     valid_cases = 0
 
+    # 转换格式，保存训练集和验证集的病例
     for case_dir in tqdm(train_case_dirs, desc="Training"):
         case_name = os.path.basename(case_dir)
         mask_path = os.path.join(case_dir, f"{case_name}_seg.nii")
@@ -103,7 +110,6 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
 
         test_cases += 1
 
-    # 生成 dataset.json
     dataset_json = {
         "channel_names": {"0": "T1", "1": "T1ce", "2": "T2", "3": "Flair"},
         "labels": {
@@ -124,16 +130,15 @@ def prepare_nnunet_data(data_dir, output_dir, task_id=101, task_name="Meningioma
     print(f"dataset.json 已生成到 {json_path}")
     print(f"最终写入训练样本 {valid_cases} 个，测试样本 {test_cases} 个。")
 
+def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--config",default="config/nnUNetset.yaml",help="配置文件路径")
+    args=parser.parse_args()
+    data_dir=args.data
+    output_dir=args.output_dir
+    prepare_nnunet_data(data_dir,output_dir)
+
+
 
 if __name__ == "__main__":
-    # 项目根目录相对路径
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(root_dir, "datasets", "raw")
-    output_dir = os.path.join(root_dir, "datasets")
-
-    # 把环境变量设置放到系统环境外层
-    os.environ["nnUNet_raw"] = os.path.join(output_dir, "nnUNet_raw")
-    os.environ["nnUNet_preprocessed"] = os.path.join(output_dir, "nnUNet_preprocessed")
-    os.environ["nnUNet_results"] = os.path.join(output_dir, "nnUNet_results")
-
-    prepare_nnunet_data(data_dir, output_dir)
+    main()
