@@ -1,6 +1,7 @@
 
 # 忽略所有数据集文件
 AGENTS.md
+CLAUDE.md
 .opencode/
 datasets/
 wandb/
@@ -10,6 +11,7 @@ models/*.pth
 models/*.pt
 outputs/
 *.log
+src/plots
 # 忽略系统与环境文件
 __pycache__/
 .venv/

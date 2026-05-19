@@ -70,5 +70,4 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-
 # python .\registration.py --max-cases 20 --atlas-path D:\python_code\projects\thesis\src\registration_simple\atlas_ready\AAL3v2.nii.gz --atlas-labels D:\python_code\projects\thesis\src\registration_simple\atlas_ready\AAL3v2.json
