@@ -1,0 +1,4 @@
+root_dir: ./datasets
+data_dir: ./datasets/raw
+processed_dir: ./datasets/nnUNet_preprocessed
+output_dir: ./datasets
