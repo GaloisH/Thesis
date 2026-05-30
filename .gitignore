@@ -1,7 +1,5 @@
 
 # 忽略所有数据集文件
-AGENTS.md
-CLAUDE.md
 .opencode/
 datasets/
 wandb/
@@ -18,3 +16,8 @@ __pycache__/
 .vscode/
 .DS_Storedata
 .claude
+
+CLAUDE.md
+AGENTS.md
+notes.md
+src/test
