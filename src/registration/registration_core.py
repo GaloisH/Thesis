@@ -25,9 +25,9 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    dataset_dir: str = r"D:\python_code\projects\thesis\datasets\nnUNet_raw\Dataset101_Meningioma"
-    output_dir: str = r"D:\python_code\projects\thesis\datasetsregistration"
-    modality: str = "T1"
+    dataset_dir: str = r"D:\python_code\projects\thesis\datasets\nnUNet_raw\Dataset002_Meningitis"
+    output_dir: str = r"datasets\registration_results"
+    modality: str = "channel_0"
     n_jobs: int = -1
     enable_checkpoint: bool = True
     ants_threads_per_worker: int = 1
@@ -40,7 +40,7 @@ class Config:
 
     @property
     def labels_dir(self) -> str:
-        return os.path.join(self.dataset_dir, "labelsTr")
+        return r"D:\python_code\projects\thesis\datasets\nnUNet_raw\2"
 
     @property
     def checkpoint_path(self) -> str:

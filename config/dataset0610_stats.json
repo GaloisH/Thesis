@@ -1,0 +1,430 @@
+{
+    "case_000": {
+        "total_voxels": 337,
+        "branches": 8
+    },
+    "case_001": {
+        "total_voxels": 506,
+        "branches": 9
+    },
+    "case_002": {
+        "total_voxels": 1690,
+        "branches": 14
+    },
+    "case_003": {
+        "total_voxels": 293,
+        "branches": 4
+    },
+    "case_004": {
+        "total_voxels": 11,
+        "branches": 2
+    },
+    "case_005": {
+        "total_voxels": 463,
+        "branches": 11
+    },
+    "case_006": {
+        "total_voxels": 428,
+        "branches": 4
+    },
+    "case_007": {
+        "total_voxels": 1117,
+        "branches": 36
+    },
+    "case_008": {
+        "total_voxels": 1526,
+        "branches": 17
+    },
+    "case_009": {
+        "total_voxels": 373,
+        "branches": 9
+    },
+    "case_010": {
+        "total_voxels": 157,
+        "branches": 8
+    },
+    "case_011": {
+        "total_voxels": 300,
+        "branches": 10
+    },
+    "case_012": {
+        "total_voxels": 489,
+        "branches": 18
+    },
+    "case_013": {
+        "total_voxels": 147,
+        "branches": 7
+    },
+    "case_014": {
+        "total_voxels": 188,
+        "branches": 8
+    },
+    "case_015": {
+        "total_voxels": 2043,
+        "branches": 76
+    },
+    "case_016": {
+        "total_voxels": 30,
+        "branches": 1
+    },
+    "case_017": {
+        "total_voxels": 285,
+        "branches": 5
+    },
+    "case_018": {
+        "total_voxels": 671,
+        "branches": 15
+    },
+    "case_019": {
+        "total_voxels": 1539,
+        "branches": 6
+    },
+    "case_020": {
+        "total_voxels": 6984,
+        "branches": 95
+    },
+    "case_021": {
+        "total_voxels": 5469,
+        "branches": 95
+    },
+    "case_022": {
+        "total_voxels": 111,
+        "branches": 4
+    },
+    "case_023": {
+        "total_voxels": 234,
+        "branches": 7
+    },
+    "case_024": {
+        "total_voxels": 43,
+        "branches": 2
+    },
+    "case_025": {
+        "total_voxels": 476,
+        "branches": 19
+    },
+    "case_026": {
+        "total_voxels": 214,
+        "branches": 7
+    },
+    "case_027": {
+        "total_voxels": 4980,
+        "branches": 89
+    },
+    "case_028": {
+        "total_voxels": 137,
+        "branches": 4
+    },
+    "case_029": {
+        "total_voxels": 60,
+        "branches": 2
+    },
+    "case_030": {
+        "total_voxels": 603,
+        "branches": 15
+    },
+    "case_031": {
+        "total_voxels": 1707,
+        "branches": 49
+    },
+    "case_032": {
+        "total_voxels": 21,
+        "branches": 3
+    },
+    "case_033": {
+        "total_voxels": 434,
+        "branches": 9
+    },
+    "case_034": {
+        "total_voxels": 5385,
+        "branches": 51
+    },
+    "case_035": {
+        "total_voxels": 1273,
+        "branches": 29
+    },
+    "case_036": {
+        "total_voxels": 439,
+        "branches": 13
+    },
+    "case_037": {
+        "total_voxels": 1002,
+        "branches": 16
+    },
+    "case_038": {
+        "total_voxels": 697,
+        "branches": 10
+    },
+    "case_039": {
+        "total_voxels": 68115,
+        "branches": 166
+    },
+    "case_040": {
+        "total_voxels": 15052,
+        "branches": 93
+    },
+    "case_041": {
+        "total_voxels": 135,
+        "branches": 6
+    },
+    "case_042": {
+        "total_voxels": 1120,
+        "branches": 19
+    },
+    "case_043": {
+        "total_voxels": 891,
+        "branches": 20
+    },
+    "case_044": {
+        "total_voxels": 1274,
+        "branches": 49
+    },
+    "case_045": {
+        "total_voxels": 261,
+        "branches": 4
+    },
+    "case_046": {
+        "total_voxels": 679,
+        "branches": 16
+    },
+    "case_047": {
+        "total_voxels": 497,
+        "branches": 17
+    },
+    "case_048": {
+        "total_voxels": 648,
+        "branches": 16
+    },
+    "case_049": {
+        "total_voxels": 182,
+        "branches": 13
+    },
+    "case_050": {
+        "total_voxels": 268,
+        "branches": 8
+    },
+    "case_051": {
+        "total_voxels": 320,
+        "branches": 12
+    },
+    "case_052": {
+        "total_voxels": 441,
+        "branches": 13
+    },
+    "case_053": {
+        "total_voxels": 249,
+        "branches": 4
+    },
+    "case_054": {
+        "total_voxels": 705,
+        "branches": 16
+    },
+    "case_055": {
+        "total_voxels": 432,
+        "branches": 13
+    },
+    "case_056": {
+        "total_voxels": 589,
+        "branches": 8
+    },
+    "case_057": {
+        "total_voxels": 6971,
+        "branches": 94
+    },
+    "case_058": {
+        "total_voxels": 8542,
+        "branches": 81
+    },
+    "case_059": {
+        "total_voxels": 3567,
+        "branches": 56
+    },
+    "case_060": {
+        "total_voxels": 289,
+        "branches": 5
+    },
+    "case_061": {
+        "total_voxels": 259,
+        "branches": 6
+    },
+    "case_062": {
+        "total_voxels": 29,
+        "branches": 2
+    },
+    "case_063": {
+        "total_voxels": 17,
+        "branches": 2
+    },
+    "case_064": {
+        "total_voxels": 45,
+        "branches": 2
+    },
+    "case_065": {
+        "total_voxels": 133,
+        "branches": 4
+    },
+    "case_066": {
+        "total_voxels": 0,
+        "branches": 0
+    },
+    "case_067": {
+        "total_voxels": 38,
+        "branches": 1
+    },
+    "case_068": {
+        "total_voxels": 210,
+        "branches": 9
+    },
+    "case_069": {
+        "total_voxels": 96,
+        "branches": 4
+    },
+    "case_070": {
+        "total_voxels": 496,
+        "branches": 13
+    },
+    "case_071": {
+        "total_voxels": 388,
+        "branches": 6
+    },
+    "case_072": {
+        "total_voxels": 354,
+        "branches": 5
+    },
+    "case_073": {
+        "total_voxels": 262,
+        "branches": 4
+    },
+    "case_074": {
+        "total_voxels": 490,
+        "branches": 9
+    },
+    "case_075": {
+        "total_voxels": 258,
+        "branches": 8
+    },
+    "case_076": {
+        "total_voxels": 12994,
+        "branches": 127
+    },
+    "case_077": {
+        "total_voxels": 105,
+        "branches": 3
+    },
+    "case_078": {
+        "total_voxels": 157,
+        "branches": 6
+    },
+    "case_079": {
+        "total_voxels": 170,
+        "branches": 7
+    },
+    "case_080": {
+        "total_voxels": 556,
+        "branches": 11
+    },
+    "case_081": {
+        "total_voxels": 473,
+        "branches": 10
+    },
+    "case_082": {
+        "total_voxels": 0,
+        "branches": 0
+    },
+    "case_083": {
+        "total_voxels": 293,
+        "branches": 7
+    },
+    "case_084": {
+        "total_voxels": 194,
+        "branches": 7
+    },
+    "case_085": {
+        "total_voxels": 242,
+        "branches": 9
+    },
+    "case_086": {
+        "total_voxels": 331,
+        "branches": 6
+    },
+    "case_087": {
+        "total_voxels": 211,
+        "branches": 4
+    },
+    "case_088": {
+        "total_voxels": 273,
+        "branches": 7
+    },
+    "case_089": {
+        "total_voxels": 247,
+        "branches": 7
+    },
+    "case_090": {
+        "total_voxels": 266,
+        "branches": 6
+    },
+    "case_091": {
+        "total_voxels": 486,
+        "branches": 15
+    },
+    "case_092": {
+        "total_voxels": 364,
+        "branches": 12
+    },
+    "case_093": {
+        "total_voxels": 5166,
+        "branches": 71
+    },
+    "case_094": {
+        "total_voxels": 146,
+        "branches": 5
+    },
+    "case_095": {
+        "total_voxels": 292,
+        "branches": 13
+    },
+    "case_096": {
+        "total_voxels": 348,
+        "branches": 13
+    },
+    "case_097": {
+        "total_voxels": 368,
+        "branches": 8
+    },
+    "case_098": {
+        "total_voxels": 226,
+        "branches": 4
+    },
+    "case_099": {
+        "total_voxels": 8,
+        "branches": 1
+    },
+    "case_100": {
+        "total_voxels": 636,
+        "branches": 18
+    },
+    "case_101": {
+        "total_voxels": 200,
+        "branches": 3
+    },
+    "case_102": {
+        "total_voxels": 257,
+        "branches": 4
+    },
+    "case_103": {
+        "total_voxels": 272,
+        "branches": 7
+    },
+    "case_104": {
+        "total_voxels": 109,
+        "branches": 6
+    },
+    "case_105": {
+        "total_voxels": 65,
+        "branches": 6
+    },
+    "case_106": {
+        "total_voxels": 388,
+        "branches": 6
+    }
+}
