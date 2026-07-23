@@ -3,7 +3,7 @@ import SimpleITK as sitk
 from SimpleITK import Image
 from tqdm import tqdm
 
-BASE_DIR = r"D:\python_code\projects\thesis\datasets\nnUNet_raw\Dataset002_Meningitis"
+BASE_DIR = r"datasets\nnUNet_raw\Dataset003_Meningitis"
 
 def print_info(img: Image):
     print(img.GetSize())
@@ -27,12 +27,15 @@ def resample_image(image, reference, interpolator=sitk.sitkNearestNeighbor):
     return out
 
 
-def main(n: int = 30, base_dir: str = BASE_DIR):
+def main(n: int = None, base_dir: str = BASE_DIR):
     '''
     对数据集中的图像和掩码进行重采样，使它们具有相同的空间分辨率和尺寸
     '''
-    data_dir = os.path.join(BASE_DIR, "imagesTr")
+    data_dir = os.path.join(BASE_DIR, "imagesTs")
     mask_dir = os.path.join(BASE_DIR, "labelsTr")
+    
+    if n is None:
+        n = len(os.listdir(data_dir)) // 3  # 假设每个case有3个图像
 
     for i in tqdm(range(n)):
         paths=[os.path.join(data_dir, f"case_{i:03d}_000{j}.nii.gz") for j in range(3)]
@@ -49,10 +52,10 @@ def main(n: int = 30, base_dir: str = BASE_DIR):
         sitk.WriteImage(resampled_2, paths[2])
 
         # 重采样掩码
-        mask_path=os.path.join(mask_dir, f"case_{i:03d}.nii.gz")
-        mask_img=sitk.ReadImage(mask_path)
-        resampled_mask=resample_image(mask_img, ref, sitk.sitkNearestNeighbor)
-        sitk.WriteImage(resampled_mask, mask_path)
+        # mask_path=os.path.join(mask_dir, f"case_{i:03d}.nii.gz")
+        # mask_img=sitk.ReadImage(mask_path)
+        # resampled_mask=resample_image(mask_img, ref, sitk.sitkNearestNeighbor)
+        # sitk.WriteImage(resampled_mask, mask_path)
 
 
 if __name__ == "__main__":

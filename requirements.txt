@@ -7,3 +7,9 @@ nnunetv2
 numpy
 nibabel
 opencv-python-headless
+scipy
+PyYAML
+tqdm
+einops
+einops-exts
+rotary-embedding-torch

@@ -216,3 +216,22 @@ python compare_models.py \
 ```bash
 pip install torch torchvision nnunetv2 monai antspyx nibabel templateflow matplotlib wandb
 ```
+
+## 脑膜炎 LeFusion-H 病灶合成
+
+单通道脑膜炎病灶合成实现位于 `src/synthesize/lefusion_meningitis/`，包含患者级划分、
+病灶 patch 准备、LeFusion-H 训练、背景保持采样、QC、nnUNet 导出和下游指标评估。
+
+使用项目解释器依次执行：
+
+```powershell
+D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis prepare
+D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis train
+D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis validate
+D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis synthesize
+D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis export
+D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis evaluate
+```
+
+每个代码文件、命令参数、输入输出、配置覆盖、实验 Dataset ID 和 Python API 的完整说明见
+[`src/synthesize/lefusion_meningitis/README.md`](src/synthesize/lefusion_meningitis/README.md)。

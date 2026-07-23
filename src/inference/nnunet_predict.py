@@ -8,7 +8,7 @@ from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 # 用户默认配置 (User Default Configuration)
 # ==========================================
 USER_CONFIG = {
-    "images": None,          # 默认输入影像路径列表, e.g., ["t1.nii.gz", "t1ce.nii.gz", "t2.nii.gz", "flair.nii.gz"]
+    "image_dir": None,          
     "output": "./output",    # 默认输出路径
     "model_dir": "./model",  # 默认模型路径
     "fold": "0",             # 默认推理折数
@@ -59,20 +59,24 @@ def predict_single(
     print(f"Prob  -> {output_dir}/{stem}_softmax_prob.npy  shape={softmax_prob.shape}")
     return seg, softmax_prob
 
+def predict_from_dir(
+    image_dir: str,
+    output_dir: str,
+    model_dir: str,
+    fold: tuple = (0,),
+    use_gaussian: bool = True,
+    device: str = "cuda",
+):
+    predictor = nnUNetPredictor(
+        tile_step_size=0.5,
+        use_gaussian=use_gaussian,
+        use_mirroring=True,
+        device=torch.device(device),
+        verbose=False,
+        allow_tqdm=True,
+    )
+    predictor.initialize_from_trained_model_folder(model_dir, use_folds=fold)
+    predictor.predict_from_files(image_dir,output_dir)
 
 if __name__ == "__main__":
-    import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("-i",  "--images",    nargs=4, default=USER_CONFIG["images"],
-                   metavar=("T1","T1CE","T2","FLAIR"), help="4个模态路径")
-    p.add_argument("-o",  "--output",    default=USER_CONFIG["output"])
-    p.add_argument("-m",  "--model_dir", default=USER_CONFIG["model_dir"])
-    p.add_argument("-f",  "--fold",      default=USER_CONFIG["fold"])
-    p.add_argument("--device",           default=USER_CONFIG["device"])
-    args = p.parse_args()
-
-    if args.images is None or len(args.images) != 4:
-        p.error("必须提供4个模态的影像路径 (-i T1 T1CE T2 FLAIR) 或在 USER_CONFIG 中配置")
-
-    folds = tuple(int(f) for f in args.fold.split(","))
-    predict_single(args.images, args.output, args.model_dir, folds, device=args.device)
+    predict_from_dir(USER_CONFIG["image_dir"], USER_CONFIG["output"], USER_CONFIG["model_dir"], fold=USER_CONFIG["fold"], device=USER_CONFIG["device"])

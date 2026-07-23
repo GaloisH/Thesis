@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 DATASET_DIR = r"D:\python_code\projects\thesis\datasets\meningitis\nii12345"
-MASK_DIR = r"D:\python_code\projects\thesis\datasets\meningitis\12345"
+MASK_DIR = r"D:\python_code\projects\thesis\datasets\meningitis\12345_1"
 OUTPUT_DIR = r"D:\python_code\projects\thesis\datasets"
 
 

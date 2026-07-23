@@ -1,0 +1,78 @@
+project_root: .
+seed: 42
+
+data:
+  source_dataset: datasets/nnUNet_raw/Dataset002_Meningitis
+  channel: 0
+  label_id: 1
+  patch_size: [32, 32, 32]
+  patch_margin: 4
+  min_component_voxels: 8
+  split_counts:
+    train: 28
+    val: 6
+    test: 6
+  registered_dir: datasetsregistration_meningitis/registered
+  prepared_dir: datasets/lefusion_meningitis/prepared
+
+normalization:
+  clip_z: 5.0
+  foreground_epsilon: 1.0e-6
+  histogram_bins: 16
+
+augmentation:
+  enabled: true
+  max_rotation_deg: 15.0
+  scale_range: [0.9, 1.1]
+  elastic_alpha: 1.0
+  elastic_sigma: 4.0
+  max_attempts: 8
+
+model:
+  image_size: 32
+  depth_size: 32
+  channels: 1
+  histogram_dim: 16
+  dim_mults: [1, 2, 4, 8]
+  timesteps: 300
+  loss_type: l1
+
+training:
+  learning_rate: 1.0e-4
+  batch_size: 4
+  effective_batch_size: 16
+  num_workers: 0
+  max_steps: 50000
+  validate_every: 500
+  save_every: 1000
+  patience_validations: 10
+  ema_decay: 0.995
+  amp: true
+  output_dir: outputs/lefusion_meningitis/training
+  resume: null
+
+synthesis:
+  checkpoint: outputs/lefusion_meningitis/training/best.pt
+  output_dir: outputs/lefusion_meningitis/synthetic
+  split: train
+  num_per_case: 1
+  histogram_jitter: 0.02
+  mask_rotation_deg: 10.0
+  mask_scale_range: [0.9, 1.1]
+  protected_dilation: 5
+  max_placement_attempts: 500
+  max_boundary_jump_z: 4.0
+  intensity_z_limit: 5.0
+
+export:
+  output_dataset: datasets/nnUNet_raw/Dataset202_MeningitisLeFusion
+  dataset_name: MeningitisLeFusion
+  include_real: true
+  synthetic_ratio: 1.0
+
+evaluation:
+  output: outputs/lefusion_meningitis/evaluation.json
+  predictions_dir: null
+  references_dir: null
+  nsd_tolerance_mm: 1.0
+
