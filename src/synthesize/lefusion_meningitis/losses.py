@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 
 def masked_foreground_loss(prediction, target, mask, loss_type: str = "l1", eps: float = 1e-8):
     """Compute foreground-normalized noise loss, independently per batch."""

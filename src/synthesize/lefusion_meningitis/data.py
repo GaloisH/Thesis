@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .io import (
     discover_cases,
     image_path,
@@ -15,6 +17,9 @@ from .io import (
     stable_hash,
     write_json,
 )
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def robust_normalize(image, clip_z: float = 5.0, epsilon: float = 1e-6):
@@ -121,8 +126,9 @@ def lesion_histogram(image, mask, bins: int = 16):
 
 def collect_case_statistics(dataset_dir: str | Path, cases: list[str], channel: int, label_id: int):
     """统计各病例的病灶体素数与连通分量数。"""
+    logger.info("Collecting lesion statistics for %d cases (channel=%d, label=%d)", len(cases), channel, label_id)
     statistics: list[dict[str, Any]] = []
-    for case_id in cases:
+    for case_id in tqdm(cases, desc="Collecting case statistics", unit="case"):
         label_array, _ = load_ras(label_path(dataset_dir, case_id), label=True)
         foreground = label_array == label_id
         _, records = component_records(foreground)
@@ -133,6 +139,9 @@ def collect_case_statistics(dataset_dir: str | Path, cases: list[str], channel: 
                 "components": int(len(records)),
             }
         )
+    total_voxels = sum(s["lesion_voxels"] for s in statistics)
+    total_components = sum(s["components"] for s in statistics)
+    logger.info("Statistics collected: %d total lesion voxels, %d total components", total_voxels, total_components)
     return statistics
 
 
@@ -199,12 +208,20 @@ def prepare(config: dict[str, Any]) -> dict[str, Any]:
     patches_dir = prepared_dir / "patches"
     patches_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info("=== Starting data preparation ===")
+    logger.info("Source dataset: %s", dataset_dir)
+    logger.info("Output directory: %s", prepared_dir)
+
     channel = int(data_cfg["channel"])
     label_id = int(data_cfg["label_id"])
     patch_size = tuple(int(value) for value in data_cfg["patch_size"])
     cases = discover_cases(dataset_dir, channel)
+    logger.info("Discovered %d cases", len(cases))
+
     statistics = collect_case_statistics(dataset_dir, cases, channel, label_id)
     split = stratified_split(statistics, data_cfg["split_counts"], int(config["seed"]))
+    logger.info("Split: train=%d, val=%d, test=%d", len(split["train"]), len(split["val"]), len(split["test"]))
+
     split_document = {
         "seed": int(config["seed"]),
         "counts": {name: len(values) for name, values in split.items()},
@@ -213,6 +230,7 @@ def prepare(config: dict[str, Any]) -> dict[str, Any]:
     }
     split_document["hash"] = stable_hash(split_document)
     write_json(prepared_dir / "split.json", split_document)
+    logger.info("Split saved to %s", prepared_dir / "split.json")
 
     case_to_split = {
         case_id: split_name for split_name, values in split.items() for case_id in values
@@ -221,7 +239,9 @@ def prepare(config: dict[str, Any]) -> dict[str, Any]:
     histograms: list[list[float]] = []
     rejected: list[dict[str, Any]] = []
 
-    for case_id in cases:
+    logger.info("Extracting lesion patches (patch_size=%s, margin=%d, min_voxels=%d)...",
+                 patch_size, data_cfg["patch_margin"], data_cfg["min_component_voxels"])
+    for case_id in tqdm(cases, desc="Extracting lesion patches", unit="case"):
         image, image_obj = load_ras(image_path(dataset_dir, case_id, channel))
         label_array, label_obj = load_ras(label_path(dataset_dir, case_id), label=True)
         if image.shape != label_array.shape:
@@ -317,6 +337,10 @@ def prepare(config: dict[str, Any]) -> dict[str, Any]:
             ],
         },
     )
+    logger.info("Manifest: %d entries, %d rejected", len(entries), len(rejected))
+    logger.info("Training histograms: %d", len(histograms))
+    logger.info("Artifacts saved to %s", prepared_dir)
+    logger.info("=== Data preparation complete ===")
     return {
         "cases": len(cases),
         "patches": len(entries),
@@ -434,6 +458,8 @@ class MeningitisPatchDataset:
             raise ValueError(f"manifest has no entries for split={split}")
         self.augmentation = augmentation if augmentation and augmentation.get("enabled") else None
         self.seed = int(seed)
+        logger.info("MeningitisPatchDataset: split=%s, entries=%d, augmentation=%s",
+                     split, len(self.entries), bool(self.augmentation))
 
     def __len__(self) -> int:
         """返回当前划分中的可用病灶 patch 数量。"""

@@ -5,9 +5,14 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .data import MeningitisPatchDataset
 from .io import read_json, stable_hash, write_json
+from .logger import get_logger
 from .model import LeFusionH, require_torch
+
+logger = get_logger(__name__)
 
 
 class EMA:
@@ -69,7 +74,7 @@ def _validate(model, loader, device) -> float:
 
 
 def train(config: dict[str, Any]) -> dict[str, Any]:
-    """运行带梯度累积、AMP、EMA、早停和断点的训练循环。"""
+    """Run training loop with gradient accumulation, AMP, EMA, early stopping, and checkpointing."""
     torch = require_torch()
     from torch.utils.data import DataLoader
 
@@ -82,6 +87,11 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
     prepared_dir = Path(data_cfg["prepared_dir"])
     manifest = read_json(prepared_dir / "manifest.json")
     split = read_json(prepared_dir / "split.json")
+
+    logger.info("=== Starting training ===")
+    logger.info("Output directory: %s", output_dir)
+    logger.info("Device: %s", "cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Max steps: %d", train_cfg["max_steps"])
 
     train_dataset = MeningitisPatchDataset(
         prepared_dir,
@@ -101,6 +111,11 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
     }
     train_loader = DataLoader(train_dataset, shuffle=True, drop_last=False, **loader_kwargs)
     val_loader = DataLoader(val_dataset, shuffle=False, drop_last=False, **loader_kwargs)
+    logger.info(
+        "Data: train=%d, val=%d, batch_size=%d, accumulation=%d, effective_batch=%d",
+        len(train_dataset), len(val_dataset), batch_size, accumulation,
+        batch_size * accumulation,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = LeFusionH(config["model"]).to(device)
@@ -117,6 +132,7 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
     history: list[dict[str, Any]] = []
     resume = train_cfg.get("resume")
     if resume:
+        logger.info("Resuming from checkpoint: %s", resume)
         checkpoint = torch.load(str(resume), map_location=device)
         model.load_state_dict(checkpoint["model"])
         ema.model.load_state_dict(checkpoint["ema_model"])
@@ -125,9 +141,10 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
         global_step = int(checkpoint["global_step"])
         best_loss = float(checkpoint.get("best_val_loss", best_loss))
         history = list(checkpoint.get("history", []))
+        logger.info("Resumed at step %d, best_val_loss=%.6f", global_step, best_loss)
 
     def save_checkpoint(name: str) -> Path:
-        """保存模型、优化器、配置、数据哈希和随机状态。"""
+        """Save model, optimizer, config, data hashes, and RNG state."""
         target = output_dir / name
         torch.save(
             {
@@ -154,7 +171,12 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
 
     model.train()
     optimizer.zero_grad(set_to_none=True)
-    while global_step < int(train_cfg["max_steps"]):
+    max_steps = int(train_cfg["max_steps"])
+    validate_every = int(train_cfg["validate_every"])
+    save_every = int(train_cfg["save_every"])
+    patience = int(train_cfg["patience_validations"])
+    pbar = tqdm(total=max_steps, desc="Training", unit="step", initial=global_step)
+    while global_step < max_steps:
         for batch in train_loader:
             image, mask, histogram = _move(batch, device)
             with torch.cuda.amp.autocast(enabled=amp_enabled):
@@ -168,8 +190,10 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
                 optimizer.zero_grad(set_to_none=True)
                 ema.update(model)
             global_step += 1
+            pbar.update(1)
+            pbar.set_postfix(loss=f"{float(loss.item() * accumulation):.4f}")
 
-            if global_step % int(train_cfg["validate_every"]) == 0:
+            if global_step % validate_every == 0:
                 val_loss = _validate(ema.model, val_loader, device)
                 record = {
                     "step": global_step,
@@ -178,27 +202,41 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
                 }
                 history.append(record)
                 write_json(output_dir / "history.json", history)
+                pbar.set_postfix(train_loss=record["train_loss"], val_loss=f"{val_loss:.4f}")
+                logger.info(
+                    "Step %d: train_loss=%.6f, val_loss=%.6f",
+                    global_step, record["train_loss"], val_loss,
+                )
                 if val_loss < best_loss:
                     best_loss = val_loss
                     stale_validations = 0
                     save_checkpoint("best.pt")
+                    logger.info("New best model at step %d (val_loss=%.6f)", global_step, best_loss)
                 else:
                     stale_validations += 1
-                if stale_validations >= int(train_cfg["patience_validations"]):
+                if stale_validations >= patience:
+                    pbar.close()
                     save_checkpoint("last.pt")
+                    logger.info(
+                        "Early stopping at step %d (no improvement for %d validations)",
+                        global_step, stale_validations,
+                    )
                     return {
                         "status": "early_stopped",
                         "global_step": global_step,
                         "best_val_loss": best_loss,
                         "output_dir": str(output_dir),
                     }
-            if global_step % int(train_cfg["save_every"]) == 0:
-                save_checkpoint(f"step_{global_step:06d}.pt")
-            if global_step >= int(train_cfg["max_steps"]):
+            if global_step % save_every == 0:
+                path = save_checkpoint(f"step_{global_step:06d}.pt")
+                logger.info("Checkpoint saved: %s", path.name)
+            if global_step >= max_steps:
                 break
+    pbar.close()
     save_checkpoint("last.pt")
     if not (output_dir / "best.pt").exists():
         save_checkpoint("best.pt")
+    logger.info("=== Training complete: step=%d, best_val_loss=%.6f ===", global_step, best_loss)
     return {
         "status": "completed",
         "global_step": global_step,
@@ -208,11 +246,14 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate(config: dict[str, Any]) -> dict[str, Any]:
-    """加载最佳 checkpoint 并生成独立验证损失报告。"""
+    """Load best checkpoint and produce a standalone validation loss report."""
     torch = require_torch()
     from torch.utils.data import DataLoader
 
     prepared_dir = Path(config["data"]["prepared_dir"])
+    checkpoint_path = config["synthesis"]["checkpoint"]
+    logger.info("=== Starting validation ===")
+    logger.info("Checkpoint: %s", checkpoint_path)
     dataset = MeningitisPatchDataset(prepared_dir, "val", seed=int(config["seed"]))
     loader = DataLoader(
         dataset,
@@ -224,15 +265,16 @@ def validate(config: dict[str, Any]) -> dict[str, Any]:
     from .model import load_model_checkpoint
 
     model, checkpoint = load_model_checkpoint(
-        config["synthesis"]["checkpoint"], config["model"], device
+        checkpoint_path, config["model"], device
     )
     loss = _validate(model, loader, device)
     report = {
-        "checkpoint": str(config["synthesis"]["checkpoint"]),
+        "checkpoint": str(checkpoint_path),
         "checkpoint_step": int(checkpoint.get("global_step", -1)),
         "validation_patches": len(dataset),
         "foreground_noise_loss": loss,
         "manifest_hash": read_json(prepared_dir / "manifest.json")["hash"],
     }
     write_json(Path(config["training"]["output_dir"]) / "validation.json", report)
+    logger.info("Validation loss: %.6f (%d patches)", loss, len(dataset))
     return report

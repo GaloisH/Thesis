@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Any
 
 from .io import load_ras, read_json, require_numpy, write_json
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def segmentation_metrics(prediction, reference, spacing, tolerance_mm: float = 1.0):
@@ -70,13 +73,17 @@ def _volume_stratum(voxels: int) -> str:
 
 
 def evaluate(config: dict[str, Any]) -> dict[str, Any]:
-    """汇总合成 QC，并可选评估一个预测结果目录。"""
+    """Aggregate synthesis QC and optionally evaluate a predictions directory."""
     np = require_numpy()
     eval_cfg = config["evaluation"]
     synthesis_dir = Path(config["synthesis"]["output_dir"])
-    metadata = [
-        read_json(path) for path in sorted((synthesis_dir / "metadata").glob("*.json"))
-    ]
+    logger.info("=== Starting evaluation ===")
+    logger.info("Synthesis directory: %s", synthesis_dir)
+
+    metadata_paths = sorted((synthesis_dir / "metadata").glob("*.json"))
+    metadata = [read_json(path) for path in metadata_paths]
+    logger.info("Loaded %d synthesis metadata records", len(metadata))
+
     report: dict[str, Any] = {
         "synthesis": {
             "accepted": len(metadata),
@@ -101,8 +108,10 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
     predictions_dir = eval_cfg.get("predictions_dir")
     references_dir = eval_cfg.get("references_dir")
     if predictions_dir and references_dir:
+        logger.info("Computing segmentation metrics: preds=%s, refs=%s", predictions_dir, references_dir)
         cases: list[dict[str, Any]] = []
-        for prediction_path in sorted(Path(predictions_dir).glob("*.nii.gz")):
+        prediction_paths = sorted(Path(predictions_dir).glob("*.nii.gz"))
+        for prediction_path in prediction_paths:
             reference_path = Path(references_dir) / prediction_path.name
             if not reference_path.exists():
                 continue
@@ -139,5 +148,12 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
                 ),
             },
         }
+        logger.info(
+            "Segmentation: %d cases, mean Dice=%.4f, mean HD95=%.2f",
+            len(cases),
+            report["segmentation"]["mean"]["dice"] or 0.0,
+            report["segmentation"]["mean"]["hd95"] or 0.0,
+        )
     write_json(eval_cfg["output"], report)
+    logger.info("Evaluation report saved to %s", eval_cfg["output"])
     return report
