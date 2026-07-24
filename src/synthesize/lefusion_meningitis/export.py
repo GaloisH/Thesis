@@ -5,7 +5,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .io import image_path, label_path, read_json, stable_hash, write_json
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _copy(source: Path, destination: Path) -> None:
@@ -15,10 +20,13 @@ def _copy(source: Path, destination: Path) -> None:
 
 
 def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
-    """将真实与通过 QC 的合成病例导出为独立 nnUNet 数据集。"""
+    """Export real + QC-passed synthetic cases as a standalone nnUNet dataset."""
     export_cfg = config["export"]
     data_cfg = config["data"]
     output = Path(export_cfg["output_dataset"])
+    logger.info("=== Starting nnUNet export ===")
+    logger.info("Output dataset: %s", output)
+
     if output.exists() and any(output.iterdir()):
         if not force:
             raise FileExistsError(
@@ -28,6 +36,7 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
         project_root = Path(config["project_root"]).resolve()
         if project_root not in resolved.parents or resolved == project_root:
             raise ValueError(f"refusing to replace unsafe output path: {resolved}")
+        logger.warning("Removing existing output dataset: %s", resolved)
         shutil.rmtree(resolved)
 
     for name in ("imagesTr", "labelsTr", "imagesTs", "labelsTs", "metadata"):
@@ -40,7 +49,8 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
     training_cases: list[str] = []
 
     if bool(export_cfg.get("include_real", True)):
-        for case_id in split["cases"]["train"]:
+        logger.info("Copying %d real training cases", len(split["cases"]["train"]))
+        for case_id in tqdm(split["cases"]["train"], desc="Exporting real cases", unit="case"):
             _copy(
                 image_path(source_dataset, case_id, channel),
                 output / "imagesTr" / f"{case_id}_0000.nii.gz",
@@ -58,8 +68,11 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
         raise RuntimeError(
             f"requested {target_synthetic} synthetic cases, only {len(selected)} passed QC"
         )
+    logger.info(
+        "Copying %d synthetic cases (ratio=%.2f)", len(selected), export_cfg["synthetic_ratio"]
+    )
     synthetic_cases: list[str] = []
-    for metadata_path in selected:
+    for metadata_path in tqdm(selected, desc="Exporting synthetic cases", unit="case"):
         metadata = read_json(metadata_path)
         sample_id = metadata["sample_id"]
         _copy(Path(metadata["outputs"]["image"]), output / "imagesTr" / f"{sample_id}_0000.nii.gz")
@@ -67,7 +80,8 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
         _copy(metadata_path, output / "metadata" / metadata_path.name)
         synthetic_cases.append(sample_id)
 
-    for case_id in split["cases"]["test"]:
+    logger.info("Copying %d test cases", len(split["cases"]["test"]))
+    for case_id in tqdm(split["cases"]["test"], desc="Exporting test cases", unit="case"):
         _copy(
             image_path(source_dataset, case_id, channel),
             output / "imagesTs" / f"{case_id}_0000.nii.gz",
@@ -93,6 +107,11 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
     }
     provenance["hash"] = stable_hash(provenance)
     write_json(output / "metadata" / "provenance.json", provenance)
+    logger.info(
+        "=== Export complete: real=%d, synthetic=%d, test=%d, numTraining=%d ===",
+        len(training_cases), len(synthetic_cases),
+        len(split["cases"]["test"]), dataset_json["numTraining"],
+    )
     return {
         "output_dataset": str(output),
         "real_training": len(training_cases),

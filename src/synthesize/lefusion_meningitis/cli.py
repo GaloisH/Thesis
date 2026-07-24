@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_config
+from .logger import get_logger, setup_logging
+
+logger = get_logger(__name__)
 
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[3] / "config" / "lefusion_meningitis.yaml"
@@ -60,9 +63,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """加载配置并将 CLI 子命令分发给对应实现。"""
+    """Load config and dispatch CLI sub-commands with logging."""
     args = build_parser().parse_args()
     config = load_config(args.config, _overrides(args.set))
+
+    log_level = config.get("logging", {}).get("level", "INFO")
+    log_file = config.get("logging", {}).get("file")
+    setup_logging(level=log_level, log_file=log_file)
+
+    logger.info("Dispatching command: %s", args.command)
+    logger.info("Config: %s", args.config)
+
     if args.command == "prepare":
         from .data import prepare
 
@@ -89,6 +100,7 @@ def main() -> None:
         result = evaluate(config)
     else:
         raise AssertionError(args.command)
+    logger.info("Command %s completed", args.command)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 

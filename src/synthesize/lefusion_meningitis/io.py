@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 
 def require_numpy():
     """延迟导入 NumPy，并在缺失时给出可操作的错误。"""
@@ -47,9 +51,11 @@ def label_path(dataset_dir: str | Path, case_id: str) -> Path:
 
 
 def discover_cases(dataset_dir: str | Path, channel: int) -> list[str]:
-    """扫描指定通道并返回排序后的训练病例 ID。"""
+    """Scan a specific channel and return sorted training case IDs."""
     images = Path(dataset_dir) / "imagesTr"
-    return sorted(case_id_from_image(path) for path in images.glob(f"*_{channel:04d}.nii.gz"))
+    cases = sorted(case_id_from_image(path) for path in images.glob(f"*_{channel:04d}.nii.gz"))
+    logger.info("Discovered %d cases in %s (channel=%d)", len(cases), images, channel)
+    return cases
 
 
 def load_ras(path: str | Path, *, label: bool = False):

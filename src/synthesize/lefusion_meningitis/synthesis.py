@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .data import (
     _affine_zoom_pair,
     centered_crop_with_padding,
@@ -20,7 +22,10 @@ from .io import (
     stable_hash,
     write_json,
 )
+from .logger import get_logger
 from .model import load_model_checkpoint, require_torch
+
+logger = get_logger(__name__)
 
 
 def transform_donor_mask(mask, rng, rotation_deg: float, scale_range):
@@ -171,7 +176,7 @@ def qc_patch(background, generated, composite, mask, config: dict[str, Any]):
 
 
 def synthesize(config: dict[str, Any]) -> dict[str, Any]:
-    """在目标病例中采样病灶并写出完整 NIfTI 训练对。"""
+    """Sample lesions into target cases and write full-volume NIfTI training pairs."""
     np = require_numpy()
     torch = require_torch()
     synthesis_cfg = config["synthesis"]
@@ -185,6 +190,10 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     for directory in (images_dir, labels_dir, masks_dir, metadata_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
+    logger.info("=== Starting synthesis ===")
+    logger.info("Output directory: %s", output_dir)
+    logger.info("Samples per case: %d", synthesis_cfg["num_per_case"])
+
     manifest = read_json(prepared_dir / "manifest.json")
     split = read_json(prepared_dir / "split.json")
     prior = read_json(prepared_dir / "position_prior.json")
@@ -195,16 +204,22 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     if not train_entries:
         raise RuntimeError("training manifest contains no donor lesions")
 
+    logger.info("Target cases: %d, donor lesions: %d", len(targets), len(train_entries))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Device: %s", device)
     model, checkpoint = load_model_checkpoint(
         synthesis_cfg["checkpoint"], config["model"], device
     )
     base_seed = int(config["seed"])
     records: list[dict[str, Any]] = []
     rejected = 0
+    num_per_case = int(synthesis_cfg["num_per_case"])
 
-    for target_index, target_case in enumerate(targets):
-        for sample_index in range(int(synthesis_cfg["num_per_case"])):
+    for target_index, target_case in enumerate(
+        tqdm(targets, desc="Synthesizing", unit="case")
+    ):
+        for sample_index in range(num_per_case):
             seed = base_seed + target_index * 100_003 + sample_index
             rng = np.random.default_rng(seed)
             donor_candidates = [
@@ -309,7 +324,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
             records.append(metadata)
 
     summary = {
-        "requested": len(targets) * int(synthesis_cfg["num_per_case"]),
+        "requested": len(targets) * num_per_case,
         "accepted": len(records),
         "rejected": rejected,
         "qc_rate": len(records) / max(len(records) + rejected, 1),
@@ -317,4 +332,8 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
         "output_dir": str(output_dir),
     }
     write_json(output_dir / "summary.json", summary)
+    logger.info(
+        "=== Synthesis complete: %d accepted, %d rejected (QC rate: %.1f%%) ===",
+        summary["accepted"], summary["rejected"], summary["qc_rate"] * 100,
+    )
     return summary
