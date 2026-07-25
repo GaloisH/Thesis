@@ -64,6 +64,166 @@ class TestArrayOperations(unittest.TestCase):
         self.assertTrue(np.array_equal(result[~mask], background[~mask]))
         self.assertTrue(np.array_equal(result[mask], generated[mask]))
 
+    def test_fixed_mask_roi_is_centered_and_rejects_invalid_masks(self):
+        import numpy as np
+
+        from src.synthesize.lefusion_meningitis.synthesis import roi_from_mask
+
+        mask = np.zeros((48, 48, 48), dtype=bool)
+        mask[21:26, 22:27, 23:28] = True
+        roi, metadata = roi_from_mask(mask, (32, 32, 32), margin=4)
+        self.assertEqual(mask[roi].shape, (32, 32, 32))
+        self.assertTrue(mask[roi].any())
+        self.assertEqual(metadata["bbox_shape"], [5, 5, 5])
+
+        with self.assertRaisesRegex(ValueError, "empty"):
+            roi_from_mask(np.zeros_like(mask), (32, 32, 32), margin=4)
+
+        edge = np.zeros_like(mask)
+        edge[:3, 20:23, 20:23] = True
+        with self.assertRaisesRegex(ValueError, "image edge"):
+            roi_from_mask(edge, (32, 32, 32), margin=4)
+
+        oversized = np.zeros_like(mask)
+        oversized[8:36, 15:20, 15:20] = True
+        with self.assertRaisesRegex(ValueError, "does not fit"):
+            roi_from_mask(oversized, (32, 32, 32), margin=4)
+
+    def test_visualization_difference_is_zero_outside_mask(self):
+        import numpy as np
+
+        from src.synthesize.lefusion_meningitis.visualization import (
+            masked_absolute_difference,
+        )
+
+        before = np.zeros((8, 8, 8), dtype=np.float32)
+        after = np.ones_like(before)
+        mask = np.zeros_like(before, dtype=bool)
+        mask[3:5, 3:5, 3:5] = True
+        difference = masked_absolute_difference(before, after, mask)
+        self.assertTrue(np.array_equal(difference[~mask], np.zeros_like(difference[~mask])))
+        self.assertTrue(np.array_equal(difference[mask], np.ones_like(difference[mask])))
+
+    def test_prepared_component_mask_is_restored_to_full_volume(self):
+        import tempfile
+        from pathlib import Path
+
+        import numpy as np
+
+        from src.synthesize.lefusion_meningitis.visualization import (
+            _mask_from_prepared_entry,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            patch = np.zeros((1, 8, 8, 8), dtype=np.uint8)
+            patch[0, 3:5, 3:5, 3:5] = 1
+            np.savez(root / "component.npz", mask=patch)
+            entry = {
+                "patch_id": "case_000_lesion001",
+                "patch": "component.npz",
+                "crop": {
+                    "start": [6, 6, 6],
+                    "end": [14, 14, 14],
+                    "padding": [[0, 0], [0, 0], [0, 0]],
+                },
+            }
+            restored = _mask_from_prepared_entry((20, 20, 20), root, entry)
+            self.assertEqual(int(restored.sum()), 8)
+            self.assertTrue(restored[9:11, 9:11, 9:11].all())
+
+
+class TestVisualizationPipeline(unittest.TestCase):
+    def test_fake_model_writes_nifti_metadata_and_all_figures(self):
+        try:
+            import matplotlib  # noqa: F401
+            import nibabel as nib
+            import numpy as np
+            import torch
+        except ImportError as exc:
+            raise unittest.SkipTest(f"visualization dependency unavailable: {exc}") from exc
+        import tempfile
+        from pathlib import Path
+
+        from src.synthesize.lefusion_meningitis.visualization import _process_case
+
+        class FakeModel:
+            def sample_patch(self, background, mask, histogram, *, generator=None):
+                return torch.where(mask.bool(), background + 0.1, background)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image_path = root / "case_000_0000.nii.gz"
+            mask_path = root / "case_000.nii.gz"
+            output = root / "visualization"
+            image = np.linspace(-1, 1, 48**3, dtype=np.float32).reshape((48, 48, 48))
+            mask = np.zeros_like(image, dtype=np.uint8)
+            mask[22:26, 22:26, 22:26] = 1
+            affine = np.diag([0.8, 0.9, 1.2, 1.0])
+            nib.save(nib.Nifti1Image(image, affine), image_path)
+            nib.save(nib.Nifti1Image(mask, affine), mask_path)
+            config = {
+                "data": {"patch_size": [32, 32, 32], "patch_margin": 4},
+                "normalization": {"clip_z": 5.0, "foreground_epsilon": 1e-6},
+                "synthesis": {
+                    "checkpoint": "fake.pt",
+                    "histogram_jitter": 0.0,
+                    "intensity_z_limit": 5.0,
+                    "max_boundary_jump_z": 4.0,
+                },
+                "visualization": {
+                    "dpi": 50,
+                    "format": "png",
+                    "mask_color": "lime",
+                    "mask_alpha": 0.45,
+                    "roi_padding": 4,
+                    "max_contact_slices": 4,
+                    "intensity_percentiles": [1.0, 99.0],
+                    "keep_intermediate_nifti": True,
+                    "save_failed_qc": True,
+                },
+            }
+            record = _process_case(
+                config,
+                FakeModel(),
+                {"global_step": 10},
+                torch.device("cpu"),
+                image_path=image_path,
+                mask_path=mask_path,
+                output_dir=output,
+                case_id="case_000",
+                seed=42,
+                histogram_library=np.ones((1, 16), dtype=np.float32) / 16,
+            )
+            self.assertEqual(record["case_id"], "case_000")
+            for name in (
+                "original.nii.gz",
+                "generated_patch.nii.gz",
+                "synthetic.nii.gz",
+                "inserted_mask.nii.gz",
+                "metadata.json",
+            ):
+                self.assertTrue((output / name).is_file(), name)
+            for name in (
+                "01_mask_orthogonal.png",
+                "02_generated_lesion.png",
+                "03_before_after_full.png",
+                "04_before_after_zoom.png",
+                "05_multislice_axial.png",
+                "06_intensity_qc.png",
+                "comparison.png",
+            ):
+                self.assertTrue((output / "figures" / name).is_file(), name)
+
+            original = nib.load(image_path)
+            synthetic = nib.load(output / "synthetic.nii.gz")
+            inserted = nib.load(output / "inserted_mask.nii.gz")
+            self.assertEqual(original.shape, synthetic.shape)
+            self.assertTrue(np.allclose(original.affine, synthetic.affine))
+            self.assertTrue(np.allclose(original.affine, inserted.affine))
+            synthetic_data = synthetic.get_fdata(dtype=np.float32)
+            self.assertTrue(np.array_equal(synthetic_data[mask == 0], image[mask == 0]))
+
 
 class TestForegroundLoss(unittest.TestCase):
     @classmethod
@@ -99,4 +259,3 @@ class TestForegroundLoss(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

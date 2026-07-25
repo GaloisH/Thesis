@@ -54,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("train", help="train the lesion-focused diffusion model")
     commands.add_parser("validate", help="evaluate foreground noise loss on validation patches")
     commands.add_parser("synthesize", help="generate full-volume synthetic training pairs")
+    visualize_parser = commands.add_parser(
+        "visualize", help="generate a fixed-mask sample and publication figures"
+    )
+    visualize_parser.add_argument("--image", type=Path, help="input 3D NIfTI image")
+    visualize_parser.add_argument("--mask", type=Path, help="aligned full-volume lesion mask")
+    visualize_parser.add_argument(
+        "--output-dir", type=Path, help="single-case directory or all-cases output root"
+    )
+    visualize_parser.add_argument("--case-id", help="single-case identifier")
+    visualize_parser.add_argument("--seed", type=int, help="sampling seed override")
     export_parser = commands.add_parser("export", help="export an isolated nnUNet dataset")
     export_parser.add_argument(
         "--force", action="store_true", help="replace only the configured output dataset"
@@ -90,6 +100,17 @@ def main() -> None:
         from .synthesis import synthesize
 
         result = synthesize(config)
+    elif args.command == "visualize":
+        from .visualization import visualize
+
+        result = visualize(
+            config,
+            image=args.image,
+            mask=args.mask,
+            output_dir=args.output_dir,
+            case_id=args.case_id,
+            seed=args.seed,
+        )
     elif args.command == "export":
         from .export import export_nnunet
 
