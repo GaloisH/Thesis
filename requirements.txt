@@ -10,6 +10,7 @@ opencv-python-headless
 scipy
 PyYAML
 tqdm
+matplotlib
 einops
 einops-exts
 rotary-embedding-torch

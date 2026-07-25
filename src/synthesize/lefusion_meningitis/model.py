@@ -208,7 +208,7 @@ def load_model_checkpoint(
     torch = require_torch()
     logger.info("Loading checkpoint: %s (use_ema=%s)", checkpoint_path, use_ema)
     model = LeFusionH(model_config).to(device)
-    checkpoint = torch.load(str(checkpoint_path), map_location=device)
+    checkpoint = torch.load(str(checkpoint_path), map_location=device, weights_only=False)
     state = checkpoint.get("ema_model") if use_ema else None
     model.load_state_dict(state or checkpoint["model"])
     model.eval()

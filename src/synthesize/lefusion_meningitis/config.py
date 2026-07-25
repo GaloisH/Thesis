@@ -46,6 +46,7 @@ def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> di
         "data": ("source_dataset", "registered_dir", "prepared_dir"),
         "training": ("output_dir", "resume"),
         "synthesis": ("checkpoint", "output_dir"),
+        "visualization": ("output_dir",),
         "export": ("output_dataset",),
         "evaluation": ("output", "predictions_dir", "references_dir"),
     }.items():

@@ -123,6 +123,94 @@ def sample_histogram(histograms, rng, jitter: float):
     return histogram / total
 
 
+def roi_from_mask(mask, patch_shape, *, margin: int = 0):
+    """Return a fixed-size ROI centered on a full-volume lesion mask.
+
+    The lesion must fit inside the patch with the requested margin. Padding is
+    deliberately not allowed because a padded image patch would change the
+    anatomical background seen by the model.
+    """
+    np = require_numpy()
+    lesion = np.asarray(mask, dtype=bool)
+    if lesion.ndim != 3:
+        raise ValueError(f"lesion mask must be 3D, got shape {lesion.shape}")
+    coordinates = np.argwhere(lesion)
+    if coordinates.size == 0:
+        raise ValueError("lesion mask is empty")
+
+    patch = np.asarray(patch_shape, dtype=np.int64)
+    if patch.shape != (3,) or np.any(patch <= 0):
+        raise ValueError(f"patch shape must contain three positive values: {patch_shape}")
+    margin = int(margin)
+    if margin < 0 or np.any(patch <= 2 * margin):
+        raise ValueError("mask margin is incompatible with patch shape")
+
+    bbox_min = coordinates.min(axis=0)
+    bbox_max = coordinates.max(axis=0) + 1
+    bbox_shape = bbox_max - bbox_min
+    available = patch - 2 * margin
+    if np.any(bbox_shape > available):
+        raise ValueError(
+            "lesion mask does not fit inside the model patch with margin: "
+            f"bbox={tuple(int(v) for v in bbox_shape)}, "
+            f"available={tuple(int(v) for v in available)}"
+        )
+
+    center = np.floor((bbox_min + bbox_max - 1) / 2.0).astype(np.int64)
+    start = center - patch // 2
+    end = start + patch
+    if np.any(start < 0) or np.any(end > np.asarray(lesion.shape)):
+        raise ValueError(
+            "lesion is too close to the image edge for an unpadded model patch"
+        )
+    if np.any(bbox_min < start + margin) or np.any(bbox_max > end - margin):
+        raise ValueError(
+            "lesion cannot be centered in the model patch with the requested margin"
+        )
+    roi = tuple(slice(int(a), int(b)) for a, b in zip(start, end))
+    return roi, {
+        "center": [int(v) for v in center],
+        "start": [int(v) for v in start],
+        "end": [int(v) for v in end],
+        "bbox_min": [int(v) for v in bbox_min],
+        "bbox_max": [int(v) for v in bbox_max],
+        "bbox_shape": [int(v) for v in bbox_shape],
+        "margin": margin,
+    }
+
+
+def sample_composite_patch(
+    model,
+    background,
+    mask,
+    histogram,
+    *,
+    device,
+    seed: int,
+):
+    """Generate a lesion patch and hard-composite it into its real background."""
+    np = require_numpy()
+    torch = require_torch()
+    background = np.asarray(background, dtype=np.float32)
+    mask = np.asarray(mask, dtype=bool)
+    histogram = np.asarray(histogram, dtype=np.float32)
+    if background.shape != mask.shape:
+        raise ValueError("background and mask patch shapes differ")
+    if not mask.any():
+        raise ValueError("synthesis mask is empty")
+
+    background_tensor = torch.from_numpy(background[None, None]).to(device)
+    mask_tensor = torch.from_numpy(mask[None, None]).to(device)
+    histogram_tensor = torch.from_numpy(histogram[None]).to(device)
+    generator = torch.Generator(device=device)
+    generator.manual_seed(int(seed))
+    generated_tensor = model.sample_patch(
+        background_tensor, mask_tensor, histogram_tensor, generator=generator
+    )
+    generated = generated_tensor[0, 0].detach().cpu().numpy()
+    return generated, hard_composite(background, generated, mask)
+
+
 def hard_composite(background, generated, mask):
     """仅替换掩膜内部体素，严格保留掩膜外背景。"""
     np = require_numpy()
@@ -266,16 +354,14 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
             histogram = sample_histogram(
                 histogram_library, rng, float(synthesis_cfg["histogram_jitter"])
             )
-            background_tensor = torch.from_numpy(background[None, None]).to(device)
-            mask_tensor = torch.from_numpy(donor_mask[None, None]).to(device)
-            histogram_tensor = torch.from_numpy(histogram[None]).to(device)
-            generator = torch.Generator(device=device)
-            generator.manual_seed(seed)
-            generated_tensor = model.sample_patch(
-                background_tensor, mask_tensor, histogram_tensor, generator=generator
+            generated, composite = sample_composite_patch(
+                model,
+                background,
+                donor_mask,
+                histogram,
+                device=device,
+                seed=seed,
             )
-            generated = generated_tensor[0, 0].detach().cpu().numpy()
-            composite = hard_composite(background, generated, donor_mask)
             qc = qc_patch(background, generated, composite, donor_mask, synthesis_cfg)
             if not qc["passed"]:
                 rejected += 1
