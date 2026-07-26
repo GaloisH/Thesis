@@ -1,6 +1,10 @@
 project_root: .
 seed: 42
 
+logging:
+  level: INFO
+  file: null
+
 data:
   source_dataset: datasets/nnUNet_raw/Dataset002_Meningitis
   channel: 0
@@ -9,9 +13,9 @@ data:
   patch_margin: 4
   min_component_voxels: 8
   split_counts:
-    train: 28
+    train: 34
     val: 6
-    test: 6
+    test: 0
   registered_dir: datasetsregistration_meningitis/registered
   prepared_dir: datasets/lefusion_meningitis/prepared
 
@@ -55,14 +59,28 @@ synthesis:
   checkpoint: outputs/lefusion_meningitis/training/best.pt
   output_dir: outputs/lefusion_meningitis/synthetic
   split: train
-  num_per_case: 1
+  num_per_case: 10
   histogram_jitter: 0.02
+  brightness_margin: 0.1
+  brightness_transition_voxels: 3.0
   mask_rotation_deg: 10.0
   mask_scale_range: [0.9, 1.1]
   protected_dilation: 5
   max_placement_attempts: 500
   max_boundary_jump_z: 4.0
   intensity_z_limit: 5.0
+
+visualization:
+  output_dir: outputs/lefusion_meningitis/visualizations
+  dpi: 180
+  format: png
+  mask_color: lime
+  mask_alpha: 0.45
+  roi_padding: 8
+  max_contact_slices: 8
+  intensity_percentiles: [1.0, 99.0]
+  keep_intermediate_nifti: true
+  save_failed_qc: true
 
 export:
   output_dataset: datasets/nnUNet_raw/Dataset202_MeningitisLeFusion
@@ -75,4 +93,3 @@ evaluation:
   predictions_dir: null
   references_dir: null
   nsd_tolerance_mm: 1.0
-

@@ -4,6 +4,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 
 def require_torch():
     """延迟导入 PyTorch，并在环境不完整时报告明确错误。"""
@@ -47,18 +51,25 @@ class LeFusionH:
     """Factory-backed nn.Module to keep import-time dependency errors actionable."""
 
     def __new__(cls, config: dict[str, Any]):
-        """根据配置动态创建依赖 PyTorch 的 LeFusion-H 模型。"""
+        """Create a PyTorch LeFusion-H model from config."""
         torch = require_torch()
         nn = torch.nn
         Unet3D = load_official_unet()
 
         class _LeFusionH(nn.Module):
             def __init__(self):
-                """初始化官方 3D U-Net 与 DDPM 前向/后验系数。"""
+                """Initialize 3D U-Net with DDPM forward/posterior coefficients."""
                 super().__init__()
                 self.config = dict(config)
                 self.timesteps = int(config["timesteps"])
                 self.loss_type = str(config.get("loss_type", "l1"))
+                logger.info(
+                    "Building LeFusion-H: image_size=%d, channels=%d, dim_mults=%s, timesteps=%d",
+                    config["image_size"],
+                    config["channels"],
+                    config["dim_mults"],
+                    self.timesteps,
+                )
                 self.denoiser = Unet3D(
                     dim=int(config["image_size"]),
                     dim_mults=tuple(int(value) for value in config["dim_mults"]),
@@ -193,11 +204,17 @@ def load_model_checkpoint(
     *,
     use_ema: bool = True,
 ):
-    """构建模型并载入普通或 EMA checkpoint 参数。"""
+    """Build model and load regular or EMA checkpoint weights."""
     torch = require_torch()
+    logger.info("Loading checkpoint: %s (use_ema=%s)", checkpoint_path, use_ema)
     model = LeFusionH(model_config).to(device)
-    checkpoint = torch.load(str(checkpoint_path), map_location=device)
+    checkpoint = torch.load(str(checkpoint_path), map_location=device, weights_only=False)
     state = checkpoint.get("ema_model") if use_ema else None
     model.load_state_dict(state or checkpoint["model"])
     model.eval()
+    logger.info(
+        "Checkpoint loaded: global_step=%d, best_val_loss=%.6f",
+        checkpoint.get("global_step", -1),
+        checkpoint.get("best_val_loss", float("nan")),
+    )
     return model, checkpoint

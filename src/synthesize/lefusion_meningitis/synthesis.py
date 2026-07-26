@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .data import (
     _affine_zoom_pair,
     centered_crop_with_padding,
@@ -20,7 +22,10 @@ from .io import (
     stable_hash,
     write_json,
 )
+from .logger import get_logger
 from .model import load_model_checkpoint, require_torch
+
+logger = get_logger(__name__)
 
 
 def transform_donor_mask(mask, rng, rotation_deg: float, scale_range):
@@ -118,6 +123,151 @@ def sample_histogram(histograms, rng, jitter: float):
     return histogram / total
 
 
+def roi_from_mask(mask, patch_shape, *, margin: int = 0):
+    """Return a fixed-size ROI centered on a full-volume lesion mask.
+
+    The lesion must fit inside the patch with the requested margin. Padding is
+    deliberately not allowed because a padded image patch would change the
+    anatomical background seen by the model.
+    """
+    np = require_numpy()
+    lesion = np.asarray(mask, dtype=bool)
+    if lesion.ndim != 3:
+        raise ValueError(f"lesion mask must be 3D, got shape {lesion.shape}")
+    coordinates = np.argwhere(lesion)
+    if coordinates.size == 0:
+        raise ValueError("lesion mask is empty")
+
+    patch = np.asarray(patch_shape, dtype=np.int64)
+    if patch.shape != (3,) or np.any(patch <= 0):
+        raise ValueError(f"patch shape must contain three positive values: {patch_shape}")
+    margin = int(margin)
+    if margin < 0 or np.any(patch <= 2 * margin):
+        raise ValueError("mask margin is incompatible with patch shape")
+
+    bbox_min = coordinates.min(axis=0)
+    bbox_max = coordinates.max(axis=0) + 1
+    bbox_shape = bbox_max - bbox_min
+    available = patch - 2 * margin
+    if np.any(bbox_shape > available):
+        raise ValueError(
+            "lesion mask does not fit inside the model patch with margin: "
+            f"bbox={tuple(int(v) for v in bbox_shape)}, "
+            f"available={tuple(int(v) for v in available)}"
+        )
+
+    center = np.floor((bbox_min + bbox_max - 1) / 2.0).astype(np.int64)
+    start = center - patch // 2
+    end = start + patch
+    if np.any(start < 0) or np.any(end > np.asarray(lesion.shape)):
+        raise ValueError(
+            "lesion is too close to the image edge for an unpadded model patch"
+        )
+    if np.any(bbox_min < start + margin) or np.any(bbox_max > end - margin):
+        raise ValueError(
+            "lesion cannot be centered in the model patch with the requested margin"
+        )
+    roi = tuple(slice(int(a), int(b)) for a, b in zip(start, end))
+    return roi, {
+        "center": [int(v) for v in center],
+        "start": [int(v) for v in start],
+        "end": [int(v) for v in end],
+        "bbox_min": [int(v) for v in bbox_min],
+        "bbox_max": [int(v) for v in bbox_max],
+        "bbox_shape": [int(v) for v in bbox_shape],
+        "margin": margin,
+    }
+
+
+def sample_composite_patch(
+    model,
+    background,
+    mask,
+    histogram,
+    *,
+    device,
+    seed: int,
+    brightness_margin: float = 0.1,
+    brightness_transition_voxels: float = 3.0,
+):
+    """Generate a lesion patch and hard-composite it into its real background."""
+    np = require_numpy()
+    torch = require_torch()
+    background = np.asarray(background, dtype=np.float32)
+    mask = np.asarray(mask, dtype=bool)
+    histogram = np.asarray(histogram, dtype=np.float32)
+    if background.shape != mask.shape:
+        raise ValueError("background and mask patch shapes differ")
+    if not mask.any():
+        raise ValueError("synthesis mask is empty")
+
+    background_tensor = torch.from_numpy(background[None, None]).to(device)
+    mask_tensor = torch.from_numpy(mask[None, None]).to(device)
+    histogram_tensor = torch.from_numpy(histogram[None]).to(device)
+    generator = torch.Generator(device=device)
+    generator.manual_seed(int(seed))
+    generated_tensor = model.sample_patch(
+        background_tensor, mask_tensor, histogram_tensor, generator=generator
+    )
+    generated = generated_tensor[0, 0].detach().cpu().numpy()
+    generated = brighten_lesion_interior(
+        background,
+        generated,
+        mask,
+        margin=brightness_margin,
+        transition_voxels=brightness_transition_voxels,
+    )
+    return generated, hard_composite(background, generated, mask)
+
+
+def brighten_lesion_interior(
+    background,
+    generated,
+    mask,
+    *,
+    margin: float = 0.1,
+    transition_voxels: float = 3.0,
+):
+    """Raise lesion intensity progressively from its boundary toward its center."""
+    np = require_numpy()
+    try:
+        from scipy.ndimage import binary_dilation, distance_transform_edt
+    except ImportError as exc:
+        raise RuntimeError("SciPy is required for lesion brightening") from exc
+
+    background = np.asarray(background, dtype=np.float32)
+    adjusted = np.asarray(generated, dtype=np.float32).copy()
+    mask = np.asarray(mask, dtype=bool)
+    if background.shape != adjusted.shape or mask.shape != background.shape:
+        raise ValueError("brightening inputs have incompatible shapes")
+    if not mask.any():
+        raise ValueError("brightening mask is empty")
+    if margin < 0:
+        raise ValueError("brightness margin must be non-negative")
+    if transition_voxels <= 0:
+        raise ValueError("brightness transition must be positive")
+
+    ring_width = max(1, int(np.ceil(transition_voxels)))
+    ring = binary_dilation(mask, iterations=ring_width) & ~mask
+    if not ring.any():
+        return adjusted
+
+    background_level = float(np.percentile(background[ring], 90))
+    lesion_level = float(np.percentile(adjusted[mask], 25))
+    offset = max(0.0, background_level + float(margin) - lesion_level)
+    if offset == 0:
+        return adjusted
+
+    distance = distance_transform_edt(mask)
+    weight = np.clip(distance / float(transition_voxels), 0.0, 1.0)
+    adjusted[mask] = np.clip(
+        adjusted[mask] + offset * weight[mask],
+        -1.0,
+        1.0,
+    )
+    return adjusted
+
+
 def hard_composite(background, generated, mask):
     """仅替换掩膜内部体素，严格保留掩膜外背景。"""
     np = require_numpy()
@@ -171,7 +321,7 @@ def qc_patch(background, generated, composite, mask, config: dict[str, Any]):
 
 
 def synthesize(config: dict[str, Any]) -> dict[str, Any]:
-    """在目标病例中采样病灶并写出完整 NIfTI 训练对。"""
+    """Sample lesions into target cases and write full-volume NIfTI training pairs."""
     np = require_numpy()
     torch = require_torch()
     synthesis_cfg = config["synthesis"]
@@ -185,6 +335,10 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     for directory in (images_dir, labels_dir, masks_dir, metadata_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
+    logger.info("=== Starting synthesis ===")
+    logger.info("Output directory: %s", output_dir)
+    logger.info("Samples per case: %d", synthesis_cfg["num_per_case"])
+
     manifest = read_json(prepared_dir / "manifest.json")
     split = read_json(prepared_dir / "split.json")
     prior = read_json(prepared_dir / "position_prior.json")
@@ -195,16 +349,22 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     if not train_entries:
         raise RuntimeError("training manifest contains no donor lesions")
 
+    logger.info("Target cases: %d, donor lesions: %d", len(targets), len(train_entries))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Device: %s", device)
     model, checkpoint = load_model_checkpoint(
         synthesis_cfg["checkpoint"], config["model"], device
     )
     base_seed = int(config["seed"])
     records: list[dict[str, Any]] = []
     rejected = 0
+    num_per_case = int(synthesis_cfg["num_per_case"])
 
-    for target_index, target_case in enumerate(targets):
-        for sample_index in range(int(synthesis_cfg["num_per_case"])):
+    for target_index, target_case in enumerate(
+        tqdm(targets, desc="Synthesizing", unit="case")
+    ):
+        for sample_index in range(num_per_case):
             seed = base_seed + target_index * 100_003 + sample_index
             rng = np.random.default_rng(seed)
             donor_candidates = [
@@ -251,16 +411,18 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
             histogram = sample_histogram(
                 histogram_library, rng, float(synthesis_cfg["histogram_jitter"])
             )
-            background_tensor = torch.from_numpy(background[None, None]).to(device)
-            mask_tensor = torch.from_numpy(donor_mask[None, None]).to(device)
-            histogram_tensor = torch.from_numpy(histogram[None]).to(device)
-            generator = torch.Generator(device=device)
-            generator.manual_seed(seed)
-            generated_tensor = model.sample_patch(
-                background_tensor, mask_tensor, histogram_tensor, generator=generator
+            generated, composite = sample_composite_patch(
+                model,
+                background,
+                donor_mask,
+                histogram,
+                device=device,
+                seed=seed,
+                brightness_margin=float(synthesis_cfg.get("brightness_margin", 0.1)),
+                brightness_transition_voxels=float(
+                    synthesis_cfg.get("brightness_transition_voxels", 3.0)
+                ),
             )
-            generated = generated_tensor[0, 0].detach().cpu().numpy()
-            composite = hard_composite(background, generated, donor_mask)
             qc = qc_patch(background, generated, composite, donor_mask, synthesis_cfg)
             if not qc["passed"]:
                 rejected += 1
@@ -309,7 +471,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
             records.append(metadata)
 
     summary = {
-        "requested": len(targets) * int(synthesis_cfg["num_per_case"]),
+        "requested": len(targets) * num_per_case,
         "accepted": len(records),
         "rejected": rejected,
         "qc_rate": len(records) / max(len(records) + rejected, 1),
@@ -317,4 +479,8 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
         "output_dir": str(output_dir),
     }
     write_json(output_dir / "summary.json", summary)
+    logger.info(
+        "=== Synthesis complete: %d accepted, %d rejected (QC rate: %.1f%%) ===",
+        summary["accepted"], summary["rejected"], summary["qc_rate"] * 100,
+    )
     return summary

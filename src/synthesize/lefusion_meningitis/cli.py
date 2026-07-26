@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_config
+from .logger import get_logger, setup_logging
+
+logger = get_logger(__name__)
 
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[3] / "config" / "lefusion_meningitis.yaml"
@@ -51,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("train", help="train the lesion-focused diffusion model")
     commands.add_parser("validate", help="evaluate foreground noise loss on validation patches")
     commands.add_parser("synthesize", help="generate full-volume synthetic training pairs")
+    visualize_parser = commands.add_parser(
+        "visualize", help="generate a fixed-mask sample and publication figures"
+    )
+    visualize_parser.add_argument("--image", type=Path, help="input 3D NIfTI image")
+    visualize_parser.add_argument("--mask", type=Path, help="aligned full-volume lesion mask")
+    visualize_parser.add_argument(
+        "--output-dir", type=Path, help="single-case directory or all-cases output root"
+    )
+    visualize_parser.add_argument("--case-id", help="single-case identifier")
+    visualize_parser.add_argument("--seed", type=int, help="sampling seed override")
     export_parser = commands.add_parser("export", help="export an isolated nnUNet dataset")
     export_parser.add_argument(
         "--force", action="store_true", help="replace only the configured output dataset"
@@ -60,9 +73,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """加载配置并将 CLI 子命令分发给对应实现。"""
+    """Load config and dispatch CLI sub-commands with logging."""
     args = build_parser().parse_args()
     config = load_config(args.config, _overrides(args.set))
+
+    log_level = config.get("logging", {}).get("level", "INFO")
+    log_file = config.get("logging", {}).get("file")
+    setup_logging(level=log_level, log_file=log_file)
+
+    logger.info("Dispatching command: %s", args.command)
+    logger.info("Config: %s", args.config)
+
     if args.command == "prepare":
         from .data import prepare
 
@@ -79,6 +100,17 @@ def main() -> None:
         from .synthesis import synthesize
 
         result = synthesize(config)
+    elif args.command == "visualize":
+        from .visualization import visualize
+
+        result = visualize(
+            config,
+            image=args.image,
+            mask=args.mask,
+            output_dir=args.output_dir,
+            case_id=args.case_id,
+            seed=args.seed,
+        )
     elif args.command == "export":
         from .export import export_nnunet
 
@@ -89,6 +121,7 @@ def main() -> None:
         result = evaluate(config)
     else:
         raise AssertionError(args.command)
+    logger.info("Command %s completed", args.command)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
