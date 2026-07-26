@@ -8,6 +8,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .data import denormalize_image, robust_normalize
 from .io import (
     image_path,
@@ -479,6 +481,12 @@ def _process_case(
         histogram,
         device=device,
         seed=seed,
+        brightness_margin=float(
+            config["synthesis"].get("brightness_margin", 0.1)
+        ),
+        brightness_transition_voxels=float(
+            config["synthesis"].get("brightness_transition_voxels", 3.0)
+        ),
     )
     qc = qc_patch(
         normalized[roi],
@@ -755,7 +763,8 @@ def visualize(
     logger.info("Visualizing %d case(s) on %s", len(entries), device)
 
     records = []
-    for index, entry in enumerate(entries):
+    for index, entry in enumerate(tqdm(entries, desc="Visualizing", unit="case")):
+        logger.info("[%d/%d] Processing case %s", index + 1, len(entries), entry["case_id"])
         target = root_output if single_case else root_output / entry["case_id"]
         records.append(
             _process_case(
@@ -777,9 +786,17 @@ def visualize(
                 ),
             )
         )
+        logger.info("[%d/%d] Finished case %s", index + 1, len(entries), entry["case_id"])
     if not single_case:
         root_output.mkdir(parents=True, exist_ok=True)
         _write_case_index(root_output, records)
+
+    logger.info(
+        "Visualization complete: %d case(s), %d passed QC, output=%s",
+        len(records),
+        sum(bool(record["qc"]["passed"]) for record in records),
+        root_output,
+    )
 
     return {
         "cases": len(records),

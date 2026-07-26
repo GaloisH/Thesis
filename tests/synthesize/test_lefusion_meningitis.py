@@ -64,6 +64,30 @@ class TestArrayOperations(unittest.TestCase):
         self.assertTrue(np.array_equal(result[~mask], background[~mask]))
         self.assertTrue(np.array_equal(result[mask], generated[mask]))
 
+    def test_lesion_brightening_is_stronger_toward_center(self):
+        import numpy as np
+
+        from src.synthesize.lefusion_meningitis.synthesis import (
+            brighten_lesion_interior,
+        )
+
+        background = np.zeros((9, 9, 9), dtype=np.float32)
+        generated = np.full_like(background, -0.5)
+        mask = np.zeros_like(background, dtype=bool)
+        mask[2:7, 2:7, 2:7] = True
+
+        adjusted = brighten_lesion_interior(
+            background,
+            generated,
+            mask,
+            margin=0.1,
+            transition_voxels=3.0,
+        )
+
+        self.assertTrue(np.array_equal(adjusted[~mask], generated[~mask]))
+        self.assertGreater(adjusted[4, 4, 4], adjusted[2, 2, 2])
+        self.assertGreater(adjusted[4, 4, 4], background[4, 4, 1])
+
     def test_fixed_mask_roi_is_centered_and_rejects_invalid_masks(self):
         import numpy as np
 

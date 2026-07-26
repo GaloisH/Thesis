@@ -187,6 +187,8 @@ def sample_composite_patch(
     *,
     device,
     seed: int,
+    brightness_margin: float = 0.1,
+    brightness_transition_voxels: float = 3.0,
 ):
     """Generate a lesion patch and hard-composite it into its real background."""
     np = require_numpy()
@@ -208,7 +210,62 @@ def sample_composite_patch(
         background_tensor, mask_tensor, histogram_tensor, generator=generator
     )
     generated = generated_tensor[0, 0].detach().cpu().numpy()
+    generated = brighten_lesion_interior(
+        background,
+        generated,
+        mask,
+        margin=brightness_margin,
+        transition_voxels=brightness_transition_voxels,
+    )
     return generated, hard_composite(background, generated, mask)
+
+
+def brighten_lesion_interior(
+    background,
+    generated,
+    mask,
+    *,
+    margin: float = 0.1,
+    transition_voxels: float = 3.0,
+):
+    """Raise lesion intensity progressively from its boundary toward its center."""
+    np = require_numpy()
+    try:
+        from scipy.ndimage import binary_dilation, distance_transform_edt
+    except ImportError as exc:
+        raise RuntimeError("SciPy is required for lesion brightening") from exc
+
+    background = np.asarray(background, dtype=np.float32)
+    adjusted = np.asarray(generated, dtype=np.float32).copy()
+    mask = np.asarray(mask, dtype=bool)
+    if background.shape != adjusted.shape or mask.shape != background.shape:
+        raise ValueError("brightening inputs have incompatible shapes")
+    if not mask.any():
+        raise ValueError("brightening mask is empty")
+    if margin < 0:
+        raise ValueError("brightness margin must be non-negative")
+    if transition_voxels <= 0:
+        raise ValueError("brightness transition must be positive")
+
+    ring_width = max(1, int(np.ceil(transition_voxels)))
+    ring = binary_dilation(mask, iterations=ring_width) & ~mask
+    if not ring.any():
+        return adjusted
+
+    background_level = float(np.percentile(background[ring], 90))
+    lesion_level = float(np.percentile(adjusted[mask], 25))
+    offset = max(0.0, background_level + float(margin) - lesion_level)
+    if offset == 0:
+        return adjusted
+
+    distance = distance_transform_edt(mask)
+    weight = np.clip(distance / float(transition_voxels), 0.0, 1.0)
+    adjusted[mask] = np.clip(
+        adjusted[mask] + offset * weight[mask],
+        -1.0,
+        1.0,
+    )
+    return adjusted
 
 
 def hard_composite(background, generated, mask):
@@ -361,6 +418,10 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                 histogram,
                 device=device,
                 seed=seed,
+                brightness_margin=float(synthesis_cfg.get("brightness_margin", 0.1)),
+                brightness_transition_voxels=float(
+                    synthesis_cfg.get("brightness_transition_voxels", 3.0)
+                ),
             )
             qc = qc_patch(background, generated, composite, donor_mask, synthesis_cfg)
             if not qc["passed"]:

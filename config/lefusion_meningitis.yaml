@@ -59,8 +59,10 @@ synthesis:
   checkpoint: outputs/lefusion_meningitis/training/best.pt
   output_dir: outputs/lefusion_meningitis/synthetic
   split: train
-  num_per_case: 1
+  num_per_case: 10
   histogram_jitter: 0.02
+  brightness_margin: 0.1
+  brightness_transition_voxels: 3.0
   mask_rotation_deg: 10.0
   mask_scale_range: [0.9, 1.1]
   protected_dilation: 5
