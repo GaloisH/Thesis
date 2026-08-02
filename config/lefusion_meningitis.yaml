@@ -64,9 +64,10 @@ synthesis:
   brightness_margin: 0.1
   brightness_transition_voxels: 3.0
   mask_rotation_deg: 10.0
-  mask_scale_range: [0.9, 1.1]
+  mask_scale_range: [0.9, 3.0]
   protected_dilation: 5
   max_placement_attempts: 500
+  max_generation_attempts_per_lesion: 10
   max_boundary_jump_z: 4.0
   intensity_z_limit: 5.0
 

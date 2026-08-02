@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -23,6 +22,12 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
     """Export real + QC-passed synthetic cases as a standalone nnUNet dataset."""
     export_cfg = config["export"]
     data_cfg = config["data"]
+    synthetic_ratio = float(export_cfg["synthetic_ratio"])
+    if not 0.0 <= synthetic_ratio <= 1.0:
+        raise ValueError(
+            "export.synthetic_ratio must be between 0 and 1 because synthesis "
+            "produces at most one cumulative output per source case"
+        )
     output = Path(export_cfg["output_dataset"])
     logger.info("=== Starting nnUNet export ===")
     logger.info("Output dataset: %s", output)
@@ -59,10 +64,17 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
             training_cases.append(case_id)
 
     synthesis_dir = Path(config["synthesis"]["output_dir"])
-    metadata_files = sorted((synthesis_dir / "metadata").glob("*.json"))
-    target_synthetic = round(
-        len(split["cases"]["train"]) * float(export_cfg["synthetic_ratio"])
-    )
+    synthesis_summary_path = synthesis_dir / "summary.json"
+    if synthesis_summary_path.is_file():
+        synthesis_summary = read_json(synthesis_summary_path)
+        metadata_files = [
+            synthesis_dir / "metadata" / f"{sample_id}.json"
+            for sample_id in synthesis_summary.get("records", [])
+        ]
+    else:
+        metadata_files = sorted((synthesis_dir / "metadata").glob("*.json"))
+    metadata_files = [path for path in metadata_files if path.is_file()]
+    target_synthetic = round(len(split["cases"]["train"]) * synthetic_ratio)
     selected = metadata_files[:target_synthetic]
     if len(selected) < target_synthetic:
         raise RuntimeError(
@@ -102,7 +114,7 @@ def export_nnunet(config: dict[str, Any], *, force: bool = False) -> dict[str, A
         "real_training_cases": training_cases,
         "synthetic_cases": synthetic_cases,
         "held_out_test_cases": split["cases"]["test"],
-        "synthetic_ratio": float(export_cfg["synthetic_ratio"]),
+        "synthetic_ratio": synthetic_ratio,
         "single_channel_mvp": True,
     }
     provenance["hash"] = stable_hash(provenance)

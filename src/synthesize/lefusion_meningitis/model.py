@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import Any
+import torch
 
 from .logger import get_logger
 
@@ -10,13 +11,7 @@ logger = get_logger(__name__)
 
 
 def require_torch():
-    """延迟导入 PyTorch，并在环境不完整时报告明确错误。"""
-    try:
-        import torch
-    except ImportError as exc:
-        raise RuntimeError(
-            "PyTorch and the LeFusion requirements are required for model commands"
-        ) from exc
+    """Return the eagerly imported PyTorch module for compatibility."""
     return torch
 
 
@@ -40,7 +35,6 @@ def load_official_unet():
 
 def _extract(values, timesteps, shape):
     """按 batch 时间步提取扩散系数并扩展到输入维度。"""
-    torch = require_torch()
     selected = values.gather(0, timesteps)
     return selected.reshape(timesteps.shape[0], *((1,) * (len(shape) - 1))).to(
         device=timesteps.device
@@ -52,7 +46,6 @@ class LeFusionH:
 
     def __new__(cls, config: dict[str, Any]):
         """Create a PyTorch LeFusion-H model from config."""
-        torch = require_torch()
         nn = torch.nn
         Unet3D = load_official_unet()
 
@@ -205,7 +198,6 @@ def load_model_checkpoint(
     use_ema: bool = True,
 ):
     """Build model and load regular or EMA checkpoint weights."""
-    torch = require_torch()
     logger.info("Loading checkpoint: %s (use_ema=%s)", checkpoint_path, use_ema)
     model = LeFusionH(model_config).to(device)
     checkpoint = torch.load(str(checkpoint_path), map_location=device, weights_only=False)
