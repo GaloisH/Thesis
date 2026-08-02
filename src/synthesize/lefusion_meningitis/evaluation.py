@@ -80,26 +80,46 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
     logger.info("=== Starting evaluation ===")
     logger.info("Synthesis directory: %s", synthesis_dir)
 
-    metadata_paths = sorted((synthesis_dir / "metadata").glob("*.json"))
-    metadata = [read_json(path) for path in metadata_paths]
+    summary_path = synthesis_dir / "summary.json"
+    summary = read_json(summary_path) if summary_path.exists() else {}
+    if summary.get("records") is not None:
+        metadata_paths = [
+            synthesis_dir / "metadata" / f"{sample_id}.json"
+            for sample_id in summary["records"]
+        ]
+    else:
+        metadata_paths = sorted((synthesis_dir / "metadata").glob("*.json"))
+    metadata = [read_json(path) for path in metadata_paths if path.is_file()]
     logger.info("Loaded %d synthesis metadata records", len(metadata))
-
+    lesion_records = [
+        lesion
+        for case_record in metadata
+        for lesion in case_record.get("lesions", [])
+    ]
+    boundary_jumps = [
+        float(lesion["qc"]["boundary_jump"])
+        for lesion in lesion_records
+        if np.isfinite(float(lesion["qc"]["boundary_jump"]))
+    ]
     report: dict[str, Any] = {
         "synthesis": {
             "accepted": len(metadata),
-            "qc_rate": (
-                read_json(synthesis_dir / "summary.json").get("qc_rate", 0.0)
-                if (synthesis_dir / "summary.json").exists()
-                else None
+            "accepted_cases": len(metadata),
+            "complete_cases": sum(
+                bool(item.get("complete", True)) for item in metadata
             ),
+            "accepted_lesions": sum(
+                int(item.get("accepted_lesions", 1)) for item in metadata
+            ),
+            "qc_rate": summary.get("qc_rate"),
             "background_exact_rate": (
                 float(np.mean([item["qc"]["background_exact"] for item in metadata]))
                 if metadata
                 else 0.0
             ),
             "mean_boundary_jump": (
-                float(np.mean([item["qc"]["boundary_jump"] for item in metadata]))
-                if metadata
+                float(np.mean(boundary_jumps))
+                if boundary_jumps
                 else None
             ),
         }

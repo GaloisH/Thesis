@@ -7,8 +7,9 @@ from typing import Any
 
 from tqdm import tqdm
 
+from ._checkpoints import restore_training_checkpoint, save_training_checkpoint
 from .data import MeningitisPatchDataset
-from .io import read_json, stable_hash, write_json
+from .io import read_json, write_json
 from .logger import get_logger
 from .model import LeFusionH, require_torch
 
@@ -133,41 +134,32 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
     resume = train_cfg.get("resume")
     if resume:
         logger.info("Resuming from checkpoint: %s", resume)
-        checkpoint = torch.load(str(resume), map_location=device)
-        model.load_state_dict(checkpoint["model"])
-        ema.model.load_state_dict(checkpoint["ema_model"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        scaler.load_state_dict(checkpoint.get("scaler", {}))
-        global_step = int(checkpoint["global_step"])
-        best_loss = float(checkpoint.get("best_val_loss", best_loss))
-        history = list(checkpoint.get("history", []))
+        restored = restore_training_checkpoint(
+            resume,
+            model=model,
+            ema_model=ema.model,
+            optimizer=optimizer,
+            scaler=scaler,
+        )
+        global_step = restored["global_step"]
+        best_loss = restored["best_val_loss"]
+        history = restored["history"]
         logger.info("Resumed at step %d, best_val_loss=%.6f", global_step, best_loss)
 
     def save_checkpoint(name: str) -> Path:
-        """Save model, optimizer, config, data hashes, and RNG state."""
-        target = output_dir / name
-        torch.save(
-            {
-                "model": model.state_dict(),
-                "ema_model": ema.model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scaler": scaler.state_dict(),
-                "global_step": global_step,
-                "best_val_loss": best_loss,
-                "history": history,
-                "config": config,
-                "manifest_hash": manifest["hash"],
-                "split_hash": split["hash"],
-                "rng": {
-                    "python": random.getstate(),
-                    "numpy": __import__("numpy").random.get_state(),
-                    "torch": torch.get_rng_state(),
-                    "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
-                },
-            },
-            target,
+        return save_training_checkpoint(
+            output_dir / name,
+            model=model,
+            ema_model=ema.model,
+            optimizer=optimizer,
+            scaler=scaler,
+            global_step=global_step,
+            best_val_loss=best_loss,
+            history=history,
+            config=config,
+            manifest_hash=manifest["hash"],
+            split_hash=split["hash"],
         )
-        return target
 
     model.train()
     optimizer.zero_grad(set_to_none=True)

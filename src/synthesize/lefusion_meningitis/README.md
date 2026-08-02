@@ -1,6 +1,7 @@
 # 脑膜炎 LeFusion-H 使用说明
 
-本目录把官方 LeFusion 的 3D U-Net 改造成单通道脑膜炎病灶合成流水线。官方代码位于
+本目录把官方 LeFusion 的 3D U-Net 改造成单通道脑膜炎病灶合成流水线。数据增强和训练
+Dataset 使用 MONAI 的字典式 Compose 管线。官方代码位于
 `src/synthesize/LeFusion/`，本实现只导入其网络结构，不修改官方源码。
 
 首版使用 `Dataset002_Meningitis` 的通道 0、`32³` patch、16-bin 病灶直方图条件和真实
@@ -24,7 +25,7 @@ D:\python_code\miniconda\python.exe -m pip install -r src/synthesize/LeFusion/re
 检查关键依赖和 GPU：
 
 ```powershell
-D:\python_code\miniconda\python.exe -c "import numpy, scipy, nibabel, yaml, torch; print(torch.__version__, torch.cuda.is_available())"
+D:\python_code\miniconda\python.exe -c "import monai, numpy, scipy, nibabel, yaml, torch; print(monai.__version__, torch.__version__, torch.cuda.is_available())"
 D:\python_code\miniconda\python.exe -m pip check
 ```
 
@@ -144,27 +145,28 @@ D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis `
 D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis synthesize
 ```
 
-每个目标病例执行以下流程：
+每个目标病例执行以下流程，并在同一个 RAS 空间状态中累计病灶：
 
 1. 从训练患者选择真实病灶掩膜并做轻度旋转、缩放；
 2. 根据训练位置先验在目标脑区寻找位置；
 3. 避开已有病灶及其膨胀保护区；
 4. 从训练直方图库采样纹理条件；
 5. 在每个反向扩散步注入真实背景；
-6. 硬合成病灶区域并执行 QC；
-7. 恢复原始方向、affine、spacing 和 header。
+6. 硬合成病灶区域并执行 QC；成功后同步更新影像、总标签和累计插入 mask；
+7. 后续病灶避开原始病灶及此前插入病灶；
+8. 所有病灶处理结束后，只写出一份最终病例，并恢复原始方向、affine、spacing 和 header。
 
 默认输出位于 `outputs/lefusion_meningitis/synthetic/`：
 
 ```text
 images/*_0000.nii.gz     合成后的单通道影像
 labels/*.nii.gz          原标签与新病灶掩膜的并集
-masks/*.nii.gz           本次插入的病灶掩膜
-metadata/*.json          来源、随机种子、条件、checkpoint 和 QC
-summary.json             请求数、通过数、拒绝数和 QC 通过率
+masks/*.nii.gz           该病例累计插入的全部病灶掩膜
+metadata/*.json          病例级结果以及每个病灶的来源、随机种子、尝试次数和 QC
+summary.json             病例数、目标/成功病灶数、失败尝试数和完成率
 ```
 
-每个训练病例生成两个版本：
+令每个训练病例的最终合成影像累计两个新增病灶：
 
 ```powershell
 D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis `
@@ -196,12 +198,10 @@ D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis `
   --set export.output_dataset="datasets/nnUNet_raw/Dataset203_MeningitisLeFusion05x" `
   export
 
-# S5：2 倍合成量，需要 synthesize.num_per_case 至少为 2
-D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis `
-  --set export.synthetic_ratio=2.0 `
-  --set export.output_dataset="datasets/nnUNet_raw/Dataset205_MeningitisLeFusion2x" `
-  export
 ```
+
+累计合成每个源病例最多产生一份合成病例，因此 `export.synthetic_ratio` 必须位于
+`[0, 1]`。`synthesis.num_per_case` 控制单个最终影像中的新增病灶数，不再控制合成病例份数。
 
 ### 2.6 `evaluate`：汇总 QC 与分割指标
 
@@ -231,7 +231,7 @@ small/medium/large 层级。
 |---|---|
 | `data` | 原始数据、通道、标签、patch、患者划分和准备目录 |
 | `normalization` | z-score 裁剪尺度和直方图 bin 数 |
-| `augmentation` | 同步空间增强及失败重试次数 |
+| `augmentation` | MONAI 同步空间增强及失败重试次数 |
 | `model` | U-Net 输入、直方图条件和扩散时间步 |
 | `training` | batch、学习率、AMP、EMA、早停和 checkpoint |
 | `synthesis` | 权重、合成数量、掩膜变形、位置搜索和 QC |
@@ -245,14 +245,15 @@ ID，并确保该折验证病例不参与直方图、位置先验、生成模型
 
 | 文件 | 作用 | 常用入口 |
 |---|---|---|
-| `cli.py` | 解析命令行并分派六个阶段 | `python -m ... <command>` |
+| `cli.py` | 解析命令行并分派七个阶段 | `python -m ... <command>` |
 | `config.py` | YAML 读取、覆盖项合并和路径解析 | `load_config()` |
 | `io.py` | nnUNet 命名、NIfTI/JSON 读写、方向恢复和哈希 | `load_ras_with_source()` |
-| `data.py` | 归一化、连通域、划分、patch、增强和 Dataset | `prepare()` |
+| `data/` | 归一化、连通域、划分、patch 及 MONAI 增强/Dataset | `prepare()` |
 | `losses.py` | 病灶前景归一化 L1/L2 损失 | `masked_foreground_loss()` |
 | `model.py` | 官方 U-Net 包装、DDPM 前向过程和背景注入采样 | `LeFusionH()` |
 | `training.py` | 训练、EMA、验证、早停和 checkpoint | `train()` / `validate()` |
-| `synthesis.py` | 掩膜变形、位置选择、直方图采样、合成与 QC | `synthesize()` |
+| `synthesis/` | 掩膜变形、位置选择、累计合成、重试与 QC | `synthesize()` |
+| `visualization/` | 固定 mask 推理、绘图以及 CSV/HTML 报告 | `visualize()` |
 | `export.py` | 生成独立单通道 nnUNet 数据集 | `export_nnunet()` |
 | `evaluation.py` | 合成 QC 和下游分割指标 | `evaluate()` |
 | `__main__.py` | 支持 `python -m` 启动 | 无需直接调用 |

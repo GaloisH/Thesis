@@ -7,24 +7,19 @@ from typing import Any
 
 from .logger import get_logger
 
+import numpy as np
+import nibabel as nib
+
 logger = get_logger(__name__)
 
 
 def require_numpy():
-    """延迟导入 NumPy，并在缺失时给出可操作的错误。"""
-    try:
-        import numpy as np
-    except ImportError as exc:
-        raise RuntimeError("NumPy is required; install project requirements first") from exc
+    """Return the eagerly imported NumPy module for compatibility."""
     return np
 
 
 def require_nibabel():
-    """延迟导入 nibabel，并在缺失时给出可操作的错误。"""
-    try:
-        import nibabel as nib
-    except ImportError as exc:
-        raise RuntimeError("nibabel is required; install project requirements first") from exc
+    """Return the eagerly imported nibabel module for compatibility."""
     return nib
 
 
@@ -60,8 +55,6 @@ def discover_cases(dataset_dir: str | Path, channel: int) -> list[str]:
 
 def load_ras(path: str | Path, *, label: bool = False):
     """读取 NIfTI 并转换为 RAS 方向的数组与影像对象。"""
-    np = require_numpy()
-    nib = require_nibabel()
     source = nib.load(str(path))
     ras = nib.as_closest_canonical(source)
     dtype = np.int16 if label else np.float32
@@ -70,8 +63,6 @@ def load_ras(path: str | Path, *, label: bool = False):
 
 def load_ras_with_source(path: str | Path, *, label: bool = False):
     """同时返回 RAS 数据、RAS 影像和原始方向影像。"""
-    np = require_numpy()
-    nib = require_nibabel()
     source = nib.load(str(path))
     ras = nib.as_closest_canonical(source)
     dtype = np.int16 if label else np.float32
@@ -80,8 +71,6 @@ def load_ras_with_source(path: str | Path, *, label: bool = False):
 
 def restore_ras_to_source(data, source):
     """Restore an RAS array to a source image's original voxel orientation."""
-    np = require_numpy()
-    nib = require_nibabel()
     canonical = nib.orientations.axcodes2ornt(("R", "A", "S"))
     source_orientation = nib.orientations.io_orientation(source.affine)
     transform = nib.orientations.ornt_transform(canonical, source_orientation)
@@ -95,8 +84,6 @@ def restore_ras_to_source(data, source):
 
 def save_like(data, reference, path: str | Path, *, dtype=None) -> None:
     """使用参考影像的 affine 与 header 保存 NIfTI 数据。"""
-    np = require_numpy()
-    nib = require_nibabel()
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     array = np.asarray(data, dtype=dtype)

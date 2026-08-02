@@ -58,13 +58,3 @@ def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> di
             candidate = Path(value)
             values[key] = str(candidate if candidate.is_absolute() else root / candidate)
     return config
-
-
-def require_keys(config: dict[str, Any], *paths: str) -> None:
-    """检查点分隔的必需配置键是否全部存在。"""
-    for dotted in paths:
-        value: Any = config
-        for part in dotted.split("."):
-            if not isinstance(value, dict) or part not in value:
-                raise ValueError(f"missing configuration key: {dotted}")
-            value = value[part]
