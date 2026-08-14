@@ -16,8 +16,11 @@ data:
     train: 34
     val: 6
     test: 0
-  registered_dir: datasetsregistration_meningitis/registered
+  registered_dir: datasets/registration_meningitis/registered
   prepared_dir: datasets/lefusion_meningitis/prepared
+  fastsurfer_subjects_dir: datasets/fastsurfer_subjects
+  fastsurfer_segmentation_template: "{case_id}/mri/aparc.DKTatlas+aseg.deep.mgz"
+  fastsurfer_lut: FastSurfer/FastSurferCNN/config/FastSurfer_ColorLUT.tsv
 
 normalization:
   clip_z: 5.0
@@ -64,7 +67,7 @@ synthesis:
   brightness_margin: 0.1
   brightness_transition_voxels: 3.0
   mask_rotation_deg: 10.0
-  mask_scale_range: [0.9, 3.0]
+  mask_scale_range: [0.9, 2]
   protected_dilation: 5
   max_placement_attempts: 500
   max_generation_attempts_per_lesion: 10

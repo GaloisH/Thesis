@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from scipy.ndimage import binary_dilation, distance_transform_edt
 
 
 def sample_histogram(histograms, rng, jitter: float):
@@ -71,10 +72,6 @@ def brighten_lesion_interior(
     transition_voxels: float = 3.0,
 ):
     """Raise lesion intensity progressively from its boundary toward its center."""
-    try:
-        from scipy.ndimage import binary_dilation, distance_transform_edt
-    except ImportError as exc:
-        raise RuntimeError("SciPy is required for lesion brightening") from exc
     background = np.asarray(background, dtype=np.float32)
     adjusted = np.asarray(generated, dtype=np.float32).copy()
     mask = np.asarray(mask, dtype=bool)
