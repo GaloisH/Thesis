@@ -100,17 +100,6 @@ def main() -> None:
         from .synthesis import synthesize
 
         result = synthesize(config)
-    elif args.command == "visualize":
-        from .visualization import visualize
-
-        result = visualize(
-            config,
-            image=args.image,
-            mask=args.mask,
-            output_dir=args.output_dir,
-            case_id=args.case_id,
-            seed=args.seed,
-        )
     elif args.command == "export":
         from .export import export_nnunet
 

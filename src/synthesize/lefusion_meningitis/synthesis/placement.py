@@ -1,26 +1,55 @@
 from __future__ import annotations
 
 from scipy.ndimage import rotate, zoom
-from scipy.ndimage import binary_dilation, binary_fill_holes, label
+from scipy.ndimage import binary_dilation
+import nibabel as nib
+from nilearn.masking import compute_brain_mask
 import numpy as np
+
+
+def compute_mask(image, affine):
+    """Compute the whole-brain mask for a 3D image."""
+    nifti_image = nib.Nifti1Image(np.asarray(image), np.asarray(affine))
+    mask = compute_brain_mask(
+        nifti_image,
+        mask_type="whole-brain",
+    ).get_fdata().astype(bool)
+    if not mask.any():
+        raise RuntimeError(
+            "computed brain mask is empty; check the image affine and field of view"
+        )
+    return mask
 
 
 def transform_donor_mask(mask, rng, rotation_deg: float, scale_range):
     """Apply a light random 3D rotation and isotropic scaling to a donor mask."""
-    transformed = np.asarray(mask, dtype=np.float32)
+    from scipy.ndimage import distance_transform_edt
+
+    mask = np.asarray(mask, dtype=bool)
+    transformed = (
+        distance_transform_edt(mask) - distance_transform_edt(~mask)
+    ).astype(np.float32)
+    outside_value = min(float(transformed.min()), -1.0)
     axes = ((0, 1), (0, 2), (1, 2))[int(rng.integers(0, 3))]
     transformed = rotate(
         transformed,
         float(rng.uniform(-rotation_deg, rotation_deg)),
         axes=axes,
         reshape=False,
-        order=0,
+        order=1,
         mode="constant",
+        cval=outside_value,
     )
     scale = float(rng.uniform(*scale_range))
     if abs(scale - 1.0) > 1e-6:
-        scaled = zoom(transformed, scale, order=0)
-        result = np.zeros_like(transformed)
+        scaled = zoom(
+            transformed,
+            scale,
+            order=1,
+            mode="constant",
+            cval=outside_value,
+        )
+        result = np.full_like(transformed, outside_value)
         source_shape = np.asarray(scaled.shape)
         target_shape = np.asarray(result.shape)
         source_start = np.maximum((source_shape - target_shape) // 2, 0)
@@ -36,10 +65,24 @@ def transform_donor_mask(mask, rng, rotation_deg: float, scale_range):
         )
         result[target] = scaled[source]
         transformed = result
-    result = transformed > 0.5
+    result = transformed > 0.0
     if not result.any():
         raise RuntimeError("donor mask transformation produced an empty mask")
     return result
+
+
+def reject_donor_geometry(mask, *, min_voxels: int) -> str | None:
+    """Return a failure reason if a transformed donor mask fails pure-geometry
+    priors, else None. Placement keeps ROI size equal to mask size, so these
+    conditions are position-independent and can be checked before model sampling."""
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return "mask_empty"
+    if int(mask.sum()) < int(min_voxels):
+        return "mask_too_small"
+    if any(np.any(np.take(mask, (0, -1), axis=axis)) for axis in range(3)):
+        return "mask_touches_patch_edge"
+    return None
 
 
 def choose_candidate(
@@ -49,19 +92,12 @@ def choose_candidate(
     position_centers,
     rng,
     *,
+    image_affine,
     protected_dilation: int,
     max_attempts: int,
 ):
     """选择一个解剖上有效的候选位置来放置合成病灶。"""
-    finite = np.isfinite(image)
-    nonzero = finite & (np.abs(image) > 1e-6)
-    components, count = label(nonzero)
-    if count:
-        sizes = np.bincount(components.ravel())
-        sizes[0] = 0
-        brain = binary_fill_holes(components == int(sizes.argmax()))
-    else:
-        brain = finite
+    brain = compute_mask(image, image_affine)
     protected = binary_dilation(existing_label > 0, iterations=protected_dilation)
     patch_shape = np.asarray(donor_mask.shape)
     half = patch_shape // 2
@@ -69,6 +105,9 @@ def choose_candidate(
     if centers.ndim != 2 or centers.shape[1] != 3 or len(centers) == 0:
         raise ValueError("position prior must contain Nx3 centers")
 
+    out_of_bounds = 0
+    outside_brain = 0
+    protected_overlap = 0
     for _ in range(max_attempts):
         fraction = centers[int(rng.integers(0, len(centers)))].copy()
         fraction += rng.normal(0.0, 0.02, size=3)
@@ -77,14 +116,21 @@ def choose_candidate(
         start = center - half
         end = start + patch_shape
         if np.any(start < 0) or np.any(end > np.asarray(image.shape)):
+            out_of_bounds += 1
             continue
         roi = tuple(slice(int(a), int(b)) for a, b in zip(start, end))
         if not np.all(brain[roi][donor_mask]):
+            outside_brain += 1
             continue
         if np.any(protected[roi][donor_mask]):
+            protected_overlap += 1
             continue
         return tuple(int(value) for value in center), roi
-    raise RuntimeError("no anatomically valid lesion placement found")
+    raise RuntimeError(
+        "no anatomically valid lesion placement found after "
+        f"{max_attempts} attempts: out_of_bounds={out_of_bounds}, "
+        f"outside_brain={outside_brain}, protected_overlap={protected_overlap}"
+    )
 
 
 def roi_from_mask(mask, patch_shape, *, margin: int = 0):

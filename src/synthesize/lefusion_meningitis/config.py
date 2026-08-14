@@ -43,7 +43,13 @@ def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> di
     logger.info("Project root: %s", config["project_root"])
 
     for section, keys in {
-        "data": ("source_dataset", "registered_dir", "prepared_dir"),
+        "data": (
+            "source_dataset",
+            "registered_dir",
+            "prepared_dir",
+            "fastsurfer_subjects_dir",
+            "fastsurfer_lut",
+        ),
         "training": ("output_dir", "resume"),
         "synthesis": ("checkpoint", "output_dir"),
         "visualization": ("output_dir",),

@@ -6,6 +6,7 @@ nnunetv2
 # Image Processing & Data Loading
 numpy
 nibabel
+nilearn
 opencv-python-headless
 scipy
 monai>=1.5.2,<1.7

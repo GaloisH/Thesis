@@ -18,7 +18,12 @@ from ..io import (
     write_json,
 )
 from ..logger import get_logger
-from .placement import choose_candidate, transform_donor_mask
+from .cortical_placement import (
+    choose_cortical_candidate,
+    load_cortical_mask,
+    placement_report,
+)
+from .placement import reject_donor_geometry, transform_donor_mask
 from .quality import aggregate_case_qc, qc_patch
 from .runtime import load_inference_runtime
 from .sampling import sample_composite_patch, sample_histogram
@@ -34,6 +39,13 @@ def _select_donor(entries, target_case: str, rng):
     candidates = [entry for entry in entries if entry["case_id"] != target_case]
     candidates = candidates or entries
     return candidates[int(rng.integers(0, len(candidates)))]
+
+
+def _fastsurfer_segmentation_path(data_cfg, case_id: str) -> Path:
+    """构造 FastSurfer 分割路径；模板为相对路径时拼接到 subjects_dir 下。"""
+    subjects_dir = Path(data_cfg["fastsurfer_subjects_dir"])
+    template = data_cfg["fastsurfer_segmentation_template"]
+    return subjects_dir / template.format(case_id=case_id)
 
 
 def synthesize(config: dict[str, Any]) -> dict[str, Any]:
@@ -78,6 +90,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     failed_cases: list[dict[str, Any]] = []
     rejected_attempts = 0
 
+    fastsurfer_lut = Path(data_cfg["fastsurfer_lut"])
     for case_index, target_case in enumerate(
         tqdm(targets, desc="Synthesizing", unit="case")
     ):
@@ -85,12 +98,31 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
             data_cfg["source_dataset"], target_case, int(data_cfg["channel"])
         )
         source_label_path = label_path(data_cfg["source_dataset"], target_case)
-        original_image, _, source_image = load_ras_with_source(source_image_path)
+        original_image, ras_image, source_image = load_ras_with_source(source_image_path)
         original_label, _, source_label = load_ras_with_source(
             source_label_path, label=True
         )
         if original_image.shape != original_label.shape:
             raise ValueError(f"{target_case}: image and label shapes differ")
+        fastsurfer_segmentation = _fastsurfer_segmentation_path(data_cfg, target_case)
+        try:
+            cortical_mask = load_cortical_mask(
+                fastsurfer_segmentation, ras_image, fastsurfer_lut
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            logger.error(
+                "%s: skipping case, cortical mask unavailable: %s",
+                target_case,
+                exc,
+            )
+            failed_cases.append(
+                {
+                    "case_id": target_case,
+                    "reason": "cortical_mask_unavailable",
+                    "error": str(exc),
+                }
+            )
+            continue
         current_image = original_image.copy()
         current_label = original_label.copy()
         inserted_mask = np.zeros(current_label.shape, dtype=np.uint8)
@@ -114,16 +146,30 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                         float(synthesis_cfg["mask_rotation_deg"]),
                         synthesis_cfg["mask_scale_range"],
                     )
+                    geometric_failure = reject_donor_geometry(
+                        donor_mask,
+                        min_voxels=int(data_cfg.get("min_component_voxels", 8)),
+                    )
+                    if geometric_failure is not None:
+                        case_rejections += 1
+                        rejected_attempts += 1
+                        logger.info(
+                            "%s lesion %d attempt %d rejected geometry prior: %s",
+                            target_case,
+                            lesion_index,
+                            attempt_index + 1,
+                            geometric_failure,
+                        )
+                        continue
                     normalized, normalization = robust_normalize(
                         current_image,
                         float(config["normalization"]["clip_z"]),
                         float(config["normalization"]["foreground_epsilon"]),
                     )
-                    center, roi = choose_candidate(
-                        current_image,
+                    center, roi = choose_cortical_candidate(
+                        cortical_mask,
                         current_label,
                         donor_mask,
-                        prior["centers"],
                         rng,
                         protected_dilation=int(synthesis_cfg["protected_dilation"]),
                         max_attempts=int(synthesis_cfg["max_placement_attempts"]),
@@ -154,7 +200,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                 except RuntimeError as exc:
                     case_rejections += 1
                     rejected_attempts += 1
-                    logger.debug(
+                    logger.info(
                         "%s lesion %d attempt %d failed: %s",
                         target_case,
                         lesion_index,
@@ -165,6 +211,13 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                 if not qc["passed"]:
                     case_rejections += 1
                     rejected_attempts += 1
+                    logger.info(
+                        "%s lesion %d attempt %d failed QC: %s",
+                        target_case,
+                        lesion_index,
+                        attempt_index + 1,
+                        qc["failures"],
+                    )
                     continue
 
                 composite_raw = denormalize_image(composite, normalization)
@@ -183,6 +236,9 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                         "source_case": donor["case_id"],
                         "source_component": int(donor["component_id"]),
                         "center_ras_voxel": list(center),
+                        "placement": placement_report(
+                            cortical_mask, roi, donor_mask
+                        ),
                         "histogram": histogram.tolist(),
                         "normalization": normalization,
                         "qc": qc,
@@ -230,6 +286,8 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
             "complete": len(lesion_records) == requested_per_case,
             "rejected_attempts": case_rejections,
             "lesions": lesion_records,
+            "fastsurfer_segmentation": str(fastsurfer_segmentation),
+            "fastsurfer_lut": str(fastsurfer_lut),
             "checkpoint": str(synthesis_cfg["checkpoint"]),
             "checkpoint_step": int(checkpoint.get("global_step", -1)),
             "manifest_hash": manifest["hash"],
