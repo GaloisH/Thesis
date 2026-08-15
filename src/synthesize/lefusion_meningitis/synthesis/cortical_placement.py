@@ -1,7 +1,8 @@
-"""FastSurfer 皮层约束的病灶放置（首版最小实现）。
+"""FastSurfer 皮层约束的病灶放置。
 
-只做体素级约束：从 FastSurfer 分割中标记为皮层（ctx-lh-/ctx-rh-）的体素里
-选取病灶中心。不引入曲面、皮层厚度或区域先验。
+病灶中心先验：从 FastSurfer 分割中标记为皮层（ctx-lh-/ctx-rh-）的体素里
+预计算合法的病灶中心集合，每次尝试从中均匀抽取。不要求病灶整体落在皮层内
+（脑膜瘤可自皮层向外延伸），不引入曲面、皮层厚度或区域先验。
 """
 
 from __future__ import annotations
@@ -73,8 +74,40 @@ def load_cortical_mask(
     return mask
 
 
+def compute_center_candidates(cortical_mask, max_patch_shape) -> np.ndarray:
+    """每例预计算合法的病灶中心集合（中心体素必须属于皮层）。
+
+    只做与供体无关的先验过滤：
+    1. 中心体素属于皮层（直接从皮层体素中筛选）；
+    2. 以最大病灶补丁尺寸 max_patch_shape 居中放置时补丁不越界。
+    实际供体的补丁尺寸不超过 max_patch_shape（transform_donor_mask 保持
+    形状不变），其 ROI 是最大补丁 ROI 的子集，因此自动满足越界约束；
+    与已有标签保护区的重叠在 choose_cortical_candidate 中按当前标签校验。
+    """
+    cortical = np.asarray(cortical_mask, dtype=bool)
+    max_patch = np.asarray(max_patch_shape, dtype=np.int64)
+    if max_patch.shape != (3,) or np.any(max_patch <= 0):
+        raise ValueError(
+            f"max patch shape must contain three positive values: {max_patch_shape}"
+        )
+    half = max_patch // 2
+    image_shape = np.asarray(cortical.shape)
+    centers = np.argwhere(cortical)
+    if len(centers) == 0:
+        raise RuntimeError("cortical mask contains no candidate voxels")
+    low_ok = centers >= half
+    high_ok = centers <= image_shape - (max_patch - half)
+    centers = centers[(low_ok & high_ok).all(axis=1)]
+    if len(centers) == 0:
+        raise RuntimeError(
+            "no cortical center can fit the maximum patch shape "
+            f"{tuple(int(v) for v in max_patch)} inside the volume"
+        )
+    return centers
+
+
 def choose_cortical_candidate(
-    cortical_mask,
+    center_candidates,
     existing_label,
     donor_mask,
     rng,
@@ -82,46 +115,39 @@ def choose_cortical_candidate(
     protected_dilation: int,
     max_attempts: int,
 ):
-    """从皮层体素均匀抽取候选中心，返回 (center, roi)。"""
-    cortical = np.asarray(cortical_mask, dtype=bool)
+    """从预计算的合法中心集合中均匀抽取候选，返回 (center, roi)。
+
+    中心在皮层内由候选集合的构造保证（见 compute_center_candidates）；
+    越界约束由最大补丁尺寸的预过滤保证，此处仅做防御性复查，并校验病灶
+    补丁是否与已有标签（含先前插入的合成病灶）的保护区域重叠。
+    """
     existing = np.asarray(existing_label)
     donor = np.asarray(donor_mask, dtype=bool)
-    if cortical.shape != existing.shape:
-        raise ValueError(
-            f"cortical mask shape {cortical.shape} does not match "
-            f"existing label shape {existing.shape}"
-        )
     if not donor.any():
         raise ValueError("donor mask is empty")
     protected = binary_dilation(existing > 0, iterations=int(protected_dilation))
+    candidates = np.asarray(center_candidates, dtype=np.int64)
+    if candidates.ndim != 2 or candidates.shape[1] != 3 or len(candidates) == 0:
+        raise ValueError("center candidates must be a non-empty Nx3 array")
     patch_shape = np.asarray(donor.shape)
     half = patch_shape // 2
-    candidates = np.argwhere(cortical)
-    if len(candidates) == 0:
-        raise RuntimeError("cortical mask contains no candidate voxels")
+    image_shape = np.asarray(existing.shape)
 
-    out_of_bounds = 0
-    outside_cortex = 0
     protected_overlap = 0
     for _ in range(int(max_attempts)):
         center = candidates[int(rng.integers(0, len(candidates)))].copy()
         start = center - half
         end = start + patch_shape
-        if np.any(start < 0) or np.any(end > np.asarray(cortical.shape)):
-            out_of_bounds += 1
-            continue
+        if np.any(start < 0) or np.any(end > image_shape):
+            continue  # 防御性检查：实际供体补丁不应超过预计算的最大尺寸
         roi = tuple(slice(int(a), int(b)) for a, b in zip(start, end))
-        if not np.all(cortical[roi][donor]):
-            outside_cortex += 1
-            continue
         if np.any(protected[roi][donor]):
             protected_overlap += 1
             continue
         return tuple(int(value) for value in center), roi
     raise RuntimeError(
         "no cortical lesion placement found after "
-        f"{max_attempts} attempts: out_of_bounds={out_of_bounds}, "
-        f"outside_cortex={outside_cortex}, protected_overlap={protected_overlap}"
+        f"{max_attempts} attempts: protected_overlap={protected_overlap}"
     )
 
 

@@ -20,6 +20,7 @@ from ..io import (
 from ..logger import get_logger
 from .cortical_placement import (
     choose_cortical_candidate,
+    compute_center_candidates,
     load_cortical_mask,
     placement_report,
 )
@@ -46,6 +47,21 @@ def _fastsurfer_segmentation_path(data_cfg, case_id: str) -> Path:
     subjects_dir = Path(data_cfg["fastsurfer_subjects_dir"])
     template = data_cfg["fastsurfer_segmentation_template"]
     return subjects_dir / template.format(case_id=case_id)
+
+
+def _max_donor_patch_shape(entries, prepared_dir: Path) -> tuple[int, int, int]:
+    """扫描全部供体病灶补丁，返回各维最大的补丁尺寸。"""
+    import numpy as np
+
+    shapes: list[tuple[int, int, int]] = []
+    for entry in entries:
+        with np.load(prepared_dir / entry["patch"]) as donor_sample:
+            shapes.append(tuple(int(v) for v in donor_sample["mask"].shape[1:]))
+    if not shapes:
+        raise RuntimeError("no donor patches available to compute max patch shape")
+    return tuple(
+        int(v) for v in np.max(np.asarray(shapes, dtype=np.int64), axis=0)
+    )
 
 
 def synthesize(config: dict[str, Any]) -> dict[str, Any]:
@@ -79,6 +95,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     ]
     if not train_entries:
         raise RuntimeError("training manifest contains no donor lesions")
+    max_patch_shape = _max_donor_patch_shape(train_entries, prepared_dir)
     target_split = str(synthesis_cfg.get("split", "train"))
     if target_split not in split["cases"]:
         raise ValueError(f"unknown synthesis split: {target_split}")
@@ -119,6 +136,24 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                 {
                     "case_id": target_case,
                     "reason": "cortical_mask_unavailable",
+                    "error": str(exc),
+                }
+            )
+            continue
+        try:
+            center_candidates = compute_center_candidates(
+                cortical_mask, max_patch_shape
+            )
+        except RuntimeError as exc:
+            logger.error(
+                "%s: skipping case, no placement centers: %s",
+                target_case,
+                exc,
+            )
+            failed_cases.append(
+                {
+                    "case_id": target_case,
+                    "reason": "no_cortical_centers",
                     "error": str(exc),
                 }
             )
@@ -167,7 +202,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                         float(config["normalization"]["foreground_epsilon"]),
                     )
                     center, roi = choose_cortical_candidate(
-                        cortical_mask,
+                        center_candidates,
                         current_label,
                         donor_mask,
                         rng,
@@ -194,9 +229,7 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
                             synthesis_cfg.get("brightness_transition_voxels", 3.0)
                         ),
                     )
-                    qc = qc_patch(
-                        background, generated, composite, donor_mask, synthesis_cfg
-                    )
+                    qc = qc_patch(background, generated, composite, donor_mask)
                 except RuntimeError as exc:
                     case_rejections += 1
                     rejected_attempts += 1

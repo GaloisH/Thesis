@@ -3,6 +3,7 @@
 from .pipeline import synthesize
 from .cortical_placement import (
     choose_cortical_candidate,
+    compute_center_candidates,
     load_cortical_mask,
     placement_report,
     read_cortical_label_ids,
@@ -19,6 +20,7 @@ from .sampling import (
 __all__ = [
     "brighten_lesion_interior",
     "choose_cortical_candidate",
+    "compute_center_candidates",
     "hard_composite",
     "load_cortical_mask",
     "placement_report",

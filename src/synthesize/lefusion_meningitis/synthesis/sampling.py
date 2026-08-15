@@ -70,8 +70,14 @@ def brighten_lesion_interior(
     *,
     margin: float = 0.1,
     transition_voxels: float = 3.0,
+    max_offset: float = 1.0,
 ):
-    """Raise lesion intensity progressively from its boundary toward its center."""
+    """Raise lesion intensity progressively from its boundary toward its center.
+
+    背景参考只取病灶外侧环带中较亮的组织样体素（中位数以上的一半），避免
+    贴脑表病灶的环带混入 CSF/空气（暗体素）把参考水平拉低；offset 同时受
+    max_offset 限制，防止病灶内部被推平到饱和。
+    """
     background = np.asarray(background, dtype=np.float32)
     adjusted = np.asarray(generated, dtype=np.float32).copy()
     mask = np.asarray(mask, dtype=bool)
@@ -83,17 +89,23 @@ def brighten_lesion_interior(
         raise ValueError("brightness margin must be non-negative")
     if transition_voxels <= 0:
         raise ValueError("brightness transition must be positive")
+    if max_offset < 0:
+        raise ValueError("max offset must be non-negative")
     ring_width = max(1, int(np.ceil(transition_voxels)))
     ring = binary_dilation(mask, iterations=ring_width) & ~mask
     if not ring.any():
         return adjusted
-    background_level = float(np.percentile(background[ring], 90))
+    ring_values = background[ring]
+    tissue = ring_values > float(np.percentile(ring_values, 50))
+    if tissue.any():
+        background_level = float(np.percentile(ring_values[tissue], 90))
+    else:
+        background_level = float(np.percentile(ring_values, 90))
     lesion_level = float(np.percentile(adjusted[mask], 25))
-    offset = max(0.0, background_level + float(margin) - lesion_level)
-    if offset == 0:
-        return adjusted
     distance = distance_transform_edt(mask)
     weight = np.clip(distance / float(transition_voxels), 0.0, 1.0)
+    offset = max(0.0, background_level + float(margin) - lesion_level)
+    offset = min(offset, float(max_offset))
     adjusted[mask] = np.clip(adjusted[mask] + offset * weight[mask], -1.0, 1.0)
     return adjusted
 
