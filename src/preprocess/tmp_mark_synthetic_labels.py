@@ -1,32 +1,45 @@
-import os
-import shutil
-import subprocess
-import sys
+import argparse
+from pathlib import Path
 
-try:
-	import nibabel as nib
-except Exception:
-	sys.exit('请先安装 nibabel: pip install nibabel')
+import nibabel as nib
+import numpy as np
 
 
-def convert_mgz_to_nii(mgz_path, nii_path):
-	if not os.path.exists(mgz_path):
-		raise FileNotFoundError(mgz_path)
-	# 首先尝试使用 nibabel 直接读取并保存为 nii.gz
-	try:
-		img = nib.load(mgz_path)
-		nib.save(img, nii_path)
-		return
-	except Exception:
-		# 如果 nibabel 失败且系统上有 FreeSurfer 的 mri_convert，则使用它
-		if shutil.which('mri_convert'):
-			subprocess.check_call(['mri_convert', mgz_path, nii_path])
-			return
-		raise
+def main(mask_dir: str, label_dir: str):
+    mask_dir = Path(mask_dir)
+    label_dir = Path(label_dir)
+
+    mask_files = sorted(list(mask_dir.glob("*.nii.gz")) + list(mask_dir.glob("*.nii")))
+    if not mask_files:
+        raise FileNotFoundError(f"未找到 mask 文件: {mask_dir}")
+
+    for m in mask_files:
+        l = label_dir / m.name
+        if not l.exists():
+            print(f"[跳过] 找不到对应 label: {l.name}")
+            continue
+
+        m_img = nib.load(str(m))
+        l_img = nib.load(str(l))
+
+        m_data = m_img.get_fdata() > 0
+        l_data = l_img.get_fdata().astype(np.int16)
+
+        if m_data.shape != l_data.shape:
+            print(f"[跳过] 尺寸不一致: {m.name}")
+            continue
+
+        l_data[m_data] = 2
+        out = nib.Nifti1Image(l_data, l_img.affine, l_img.header)
+        nib.save(out, str(l))
+        print(f"[完成] {l.name}")
+
+    print("全部处理完成。")
 
 
-if __name__ == '__main__':
-	base = r'D:\python_code\projects\thesis\outputs\cortex_seg\patient001\mri'
-	# convert_mgz_to_nii(os.path.join(base, 'aparc.DKTatlas+aseg.deep.mgz'), os.path.join(base, 'aparc.DKTatlas+aseg.deep.nii.gz'))
-	# convert_mgz_to_nii(os.path.join(base, 'mask.mgz'), os.path.join(base, 'mask.nii.gz'))
-	convert_mgz_to_nii(os.path.join(base, 'orig.mgz'), os.path.join(base, 'orig.nii.gz'))
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="将 label 中 mask 区域标为 2")
+    parser.add_argument("--mask_dir", required=True, help="mask 文件夹路径")
+    parser.add_argument("--label_dir", required=True, help="label 文件夹路径")
+    args = parser.parse_args()
+    main(args.mask_dir, args.label_dir)
