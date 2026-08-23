@@ -11,6 +11,7 @@ opencv-python-headless
 scipy
 monai>=1.5.2,<1.7
 PyYAML
+swanlab
 tqdm
 matplotlib
 einops

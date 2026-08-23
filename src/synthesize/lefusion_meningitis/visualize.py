@@ -100,7 +100,7 @@ def visualize(ori_img_path, img_path: str, label_path: str, mask_path: str):
 def run():
     with open(CONFIG_PATH, "r") as f:
         config = yaml.safe_load(f)
-    dir_path = config["synthesis"]["output_dir"]
+    dir_path = r'datasets\synthesis_0819'
     output_dir = config["visualization"]["output_dir"]
     ori_img_dir_path = config["data"]["source_dataset"]
     if not os.path.exists(output_dir):

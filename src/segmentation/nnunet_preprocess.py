@@ -1,124 +1,49 @@
 #!/usr/bin/env python3
-"""nnUNet plan & preprocess launcher.
-
-Replaces preprocess.sh. Reads configuration from config/nnUNetseg_preprocess.yaml.
-
-Usage:
-    python src/segmentation/nnunet_preprocess.py
-    python src/segmentation/nnunet_preprocess.py --config config/nnUNetseg_preprocess.yaml
-"""
+"""Run nnUNet planning and preprocessing from the project YAML configuration."""
 
 import argparse
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import yaml
 
 
-def load_config(config_path: str) -> dict:
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def resolve_paths(cfg: dict, project_root: str) -> dict[str, str]:
-    root_dir = cfg.get("root_dir", "./datasets")
-    if not os.path.isabs(root_dir):
-        root_dir = os.path.normpath(os.path.join(project_root, root_dir))
-    return {
-        "nnUNet_raw": os.path.join(root_dir, "nnUNet_raw"),
-        "nnUNet_preprocessed": os.path.join(root_dir, "nnUNet_preprocessed"),
-        "nnUNet_results": os.path.join(root_dir, "nnUNet_results"),
-    }
-
-
-def setup_environment(paths: dict[str, str]) -> None:
-    for key, value in paths.items():
-        os.makedirs(value, exist_ok=True)
-        os.environ[key] = value
-
-
-def check_raw_data(raw_dir: str, task_id: str, task_name: str) -> str:
-    task_dir = os.path.join(raw_dir, f"Dataset{task_id}_{task_name}")
-    if not os.path.isdir(task_dir) or not os.listdir(task_dir):
-        print(f"No data detected at: {task_dir}")
-        print("Please run: python src/segmentation/prepare_data.py")
-        sys.exit(1)
-    return task_dir
-
-
-def run_command(command: list[str]) -> None:
-    print(f">> Running: {' '.join(command)}")
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=os.environ.copy(),
-        )
-        for line in process.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-        process.wait()
-        if process.returncode != 0:
-            print(f"Command failed with return code: {process.returncode}")
-            sys.exit(process.returncode)
-    except Exception as e:
-        print(f"Execution error: {e}")
-        sys.exit(1)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "nnUNetseg_preprocess.yaml"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="nnUNet plan & preprocess launcher")
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to YAML config (default: config/nnUNetseg_preprocess.yaml relative to project root)",
-    )
+    parser = argparse.ArgumentParser(description="Run nnUNet planning and preprocessing")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     args = parser.parse_args()
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_path = args.config or os.path.join(project_root, "config", "nnUNetseg_preprocess.yaml")
+    with args.config.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
 
-    if not os.path.exists(config_path):
-        print(f"Config file not found: {config_path}")
-        sys.exit(1)
+    root_dir = Path(config["root_dir"])
+    if not root_dir.is_absolute():
+        root_dir = PROJECT_ROOT / root_dir
 
-    cfg = load_config(config_path)
-    paths = resolve_paths(cfg, project_root)
-    setup_environment(paths)
-
-    task_id = str(cfg["task_id"])
-    task_name = cfg.get("task_name", "Meningioma")
-    nnunet_config = cfg["config"]
-
-    print("Environment variables:")
-    for key in paths:
-        print(f"  {key} = {os.environ[key]}")
-    print()
-
-    check_raw_data(paths["nnUNet_raw"], task_id, task_name)
-
-    print("=" * 60)
-    print("Plan & Preprocess")
-    print("=" * 60)
+    environment = os.environ.copy()
+    for name in ("nnUNet_raw", "nnUNet_preprocessed", "nnUNet_results"):
+        path = root_dir / name
+        path.mkdir(parents=True, exist_ok=True)
+        environment[name] = str(path)
+        print(f"{name} = {path}")
 
     command = [
         "nnUNetv2_plan_and_preprocess",
-        "-d", task_id,
-        "-c", nnunet_config,
+        "-d",
+        str(config["task_id"]),
+        "-c",
+        str(config["config"]),
     ]
-    if cfg.get("verify_dataset_integrity", True):
+    if config["verify_dataset_integrity"]:
         command.append("--verify_dataset_integrity")
 
-    run_command(command)
-
-    print()
-    print("Preprocessing complete.")
+    subprocess.run(command, check=True, env=environment)
+    print("Preprocessing finished")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,5 @@
-# nnUNet plan & preprocess configuration
-# Usage: python src/segmentation/nnunet_preprocess.py [--config config/nnUNetseg_preprocess.yaml]
-
-task_id: "101"
-task_name: "Meningioma"
-config: "2d"
+# Usage: python src/segmentation/nnunet_preprocess.py
+task_id: "002"
+config: "3d_fullres"
 verify_dataset_integrity: true
-
-# Paths — relative to project root, or set absolute paths
 root_dir: "./datasets"

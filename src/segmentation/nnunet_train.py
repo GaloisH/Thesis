@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""nnUNet training launcher — 3d_fullres with 100 epochs.
-
-Replaces train.sh. Reads configuration from config/nnUNetseg_train.yaml.
-
-Usage:
-    python src/segmentation/nnunet_train.py
-    python src/segmentation/nnunet_train.py --config config/nnUNetseg_train.yaml
-"""
+"""Run nnUNet training from the project YAML configuration."""
 
 import argparse
 import os
@@ -18,116 +11,77 @@ from pathlib import Path
 import yaml
 
 
-def load_config(config_path: str) -> dict:
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "nnUNetseg_train.yaml"
 
 
-def resolve_paths(cfg: dict, project_root: str) -> dict[str, str]:
-    root_dir = cfg.get("root_dir", "./datasets")
-    if not os.path.isabs(root_dir):
-        root_dir = os.path.normpath(os.path.join(project_root, root_dir))
-    return {
-        "nnUNet_raw": os.path.join(root_dir, "nnUNet_raw"),
-        "nnUNet_preprocessed": os.path.join(root_dir, "nnUNet_preprocessed"),
-        "nnUNet_results": os.path.join(root_dir, "nnUNet_results"),
-    }
+def run_nnunet_with_swanlab() -> None:
+    """Enable SwanLab's W&B sync before nnUNet initializes its logger."""
+    import swanlab
+    from nnunetv2.run.run_training import run_training_entry
 
-
-def setup_environment(paths: dict[str, str], cfg: dict) -> None:
-    for key, value in paths.items():
-        os.makedirs(value, exist_ok=True)
-        os.environ[key] = value
-
-    wandb_cfg = cfg.get("wandb", {})
-    os.environ["nnUNet_wandb_enabled"] = "1" if wandb_cfg.get("enabled", True) else "0"
-    os.environ["nnUNet_wandb_project"] = str(wandb_cfg.get("project", "nnUNet_Meningioma"))
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    name_prefix = wandb_cfg.get("name_prefix", "Task101_3d_fullres_fold0")
-    os.environ["WANDB_NAME"] = f"{name_prefix}_{timestamp}"
-
-
-def check_preprocessed(preprocessed_dir: str, task_id: str, task_name: str) -> str:
-    preprocess_dir = os.path.join(preprocessed_dir, f"Dataset{task_id}_{task_name}")
-    if not os.path.isdir(preprocess_dir) or not os.listdir(preprocess_dir):
-        print(f"Preprocessed data not found: {preprocess_dir}")
-        sys.exit(1)
-    return preprocess_dir
-
-
-def run_command(command: list[str]) -> None:
-    print(f"\n>> Running: {' '.join(command)}")
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=os.environ.copy(),
-        )
-        for line in process.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-        process.wait()
-        if process.returncode != 0:
-            print(f"Command failed with return code: {process.returncode}")
-            sys.exit(process.returncode)
-    except Exception as e:
-        print(f"Execution error: {e}")
-        sys.exit(1)
+    swanlab.sync_wandb()
+    run_training_entry()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="nnUNet 3d_fullres training launcher")
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to YAML config (default: config/nnUNetseg_train.yaml relative to project root)",
-    )
+    parser = argparse.ArgumentParser(description="Run nnUNet training")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     args = parser.parse_args()
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_path = args.config or os.path.join(project_root, "config", "nnUNetseg_train.yaml")
+    with args.config.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
 
-    if not os.path.exists(config_path):
-        print(f"Config file not found: {config_path}")
-        sys.exit(1)
+    root_dir = Path(config["root_dir"])
+    if not root_dir.is_absolute():
+        root_dir = PROJECT_ROOT / root_dir
 
-    cfg = load_config(config_path)
-    paths = resolve_paths(cfg, project_root)
-    setup_environment(paths, cfg)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "nnUNet_raw": str(root_dir / "nnUNet_raw"),
+            "nnUNet_preprocessed": str(root_dir / "nnUNet_preprocessed"),
+            "nnUNet_results": str(root_dir / "nnUNet_results"),
+            "nnUNet_wandb_enabled": "1" if config["wandb"]["enabled"] else "0",
+            "nnUNet_wandb_project": str(config["wandb"]["project"]),
+        }
+    )
 
-    task_id = str(cfg["task_id"])
-    trainer = cfg["trainer"]
-    nnunet_config = cfg["config"]
-    fold = cfg["fold"]
+    print("Environment")
+    for name in ("nnUNet_raw", "nnUNet_preprocessed", "nnUNet_results"):
+        print(f"{name} = {environment[name]}")
 
-    print("Environment variables:")
-    for key in paths:
-        print(f"  {key} = {os.environ[key]}")
-    print(f"  WANDB_NAME = {os.environ['WANDB_NAME']}")
-    print()
+    for fold in config["folds"]:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        environment["WANDB_NAME"] = config["wandb"]["name_template"].format(
+            task_id=config["task_id"],
+            config=config["config"],
+            fold=fold,
+            timestamp=timestamp,
+        )
+        print(f"Training fold {fold}: WANDB_NAME={environment['WANDB_NAME']}")
+        subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--swanlab-nnunet",
+                str(config["task_id"]),
+                str(config["config"]),
+                str(fold),
+                "-tr",
+                str(config["trainer"]),
+            ],
+            check=True,
+            env=environment,
+        )
+        print(f"Fold {fold} finished")
 
-    check_preprocessed(paths["nnUNet_preprocessed"], task_id, cfg.get("task_name", "Meningioma"))
-
-    print("=" * 60)
-    print("Starting training")
-    print("=" * 60)
-
-    run_command([
-        "nnUNetv2_train",
-        task_id,
-        nnunet_config,
-        str(fold),
-        "-tr", trainer,
-    ])
-
-    print()
-    print(f"Training complete. Results saved to: {paths['nnUNet_results']}")
+    print("All training finished")
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["--swanlab-nnunet"]:
+        del sys.argv[1]
+        run_nnunet_with_swanlab()
+    else:
+        main()
