@@ -59,6 +59,7 @@ training:
   resume: null
 
 synthesis:
+  target: datasets/IXI-T1
   checkpoint: outputs/lefusion_meningitis/training/best.pt
   output_dir: outputs/lefusion_meningitis/synthetic
   split: train

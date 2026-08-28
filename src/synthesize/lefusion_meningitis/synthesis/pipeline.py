@@ -64,8 +64,53 @@ def _max_donor_patch_shape(entries, prepared_dir: Path) -> tuple[int, int, int]:
     )
 
 
+def _discover_external_targets(target_dir: str | Path) -> list[dict[str, Any]]:
+    """Discover flat NIfTI targets and use each full filename stem as its case ID."""
+    directory = Path(target_dir)
+    if not directory.is_dir():
+        raise NotADirectoryError(f"synthesis target is not a directory: {directory}")
+    images = sorted(directory.glob("*.nii.gz"), key=lambda path: path.name)
+    if not images:
+        raise RuntimeError(f"synthesis target contains no .nii.gz images: {directory}")
+    targets = [
+        {
+            "case_id": path.name[:-7],
+            "image_path": path,
+            "label_path": None,
+        }
+        for path in images
+    ]
+    case_ids = [target["case_id"] for target in targets]
+    if len(case_ids) != len(set(case_ids)):
+        raise ValueError(f"synthesis target contains duplicate case IDs: {directory}")
+    logger.info("Discovered %d external synthesis target(s) in %s", len(targets), directory)
+    return targets
+
+
 def synthesize(config: dict[str, Any]) -> dict[str, Any]:
-    """Generate one cumulative synthetic volume per target case."""
+    """Dispatch to external-directory or legacy split-backed synthesis."""
+    if config["synthesis"].get("target"):
+        return synthesize_target(config)
+    return synthesize_legacy(config)
+
+
+def synthesize_target(config: dict[str, Any]) -> dict[str, Any]:
+    """Synthesize into unlabeled images discovered directly under a target directory."""
+    targets = _discover_external_targets(config["synthesis"]["target"])
+    return _synthesize_cases(config, external_targets=targets)
+
+
+def synthesize_legacy(config: dict[str, Any]) -> dict[str, Any]:
+    """Preserve split-backed nnUNet synthesis for configurations without a target."""
+    return _synthesize_cases(config)
+
+
+def _synthesize_cases(
+    config: dict[str, Any],
+    *,
+    external_targets: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Generate one cumulative synthetic volume per resolved target case."""
     np = require_numpy()
     synthesis_cfg = config["synthesis"]
     data_cfg = config["data"]
@@ -90,16 +135,30 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     manifest = read_json(prepared_dir / "manifest.json")
     split = read_json(prepared_dir / "split.json")
     prior = read_json(prepared_dir / "position_prior.json")
+
+    # Select target cases for synthesis
     train_entries = [
         entry for entry in manifest["entries"] if entry["split"] == "train"
     ]
     if not train_entries:
         raise RuntimeError("training manifest contains no donor lesions")
     max_patch_shape = _max_donor_patch_shape(train_entries, prepared_dir)
-    target_split = str(synthesis_cfg.get("split", "train"))
-    if target_split not in split["cases"]:
-        raise ValueError(f"unknown synthesis split: {target_split}")
-    targets = list(split["cases"][target_split])
+    if external_targets is None:
+        target_split = str(synthesis_cfg.get("split", "train"))
+        if target_split not in split["cases"]:
+            raise ValueError(f"unknown synthesis split: {target_split}")
+        targets = [
+            {
+                "case_id": case_id,
+                "image_path": image_path(
+                    data_cfg["source_dataset"], case_id, int(data_cfg["channel"])
+                ),
+                "label_path": label_path(data_cfg["source_dataset"], case_id),
+            }
+            for case_id in split["cases"][target_split]
+        ]
+    else:
+        targets = list(external_targets)
     model, checkpoint, device, histogram_library = load_inference_runtime(config)
     label_id = int(data_cfg["label_id"])
     base_seed = int(config["seed"])
@@ -108,17 +167,21 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     rejected_attempts = 0
 
     fastsurfer_lut = Path(data_cfg["fastsurfer_lut"])
-    for case_index, target_case in enumerate(
+    for case_index, target in enumerate(
         tqdm(targets, desc="Synthesizing", unit="case")
     ):
-        source_image_path = image_path(
-            data_cfg["source_dataset"], target_case, int(data_cfg["channel"])
-        )
-        source_label_path = label_path(data_cfg["source_dataset"], target_case)
+        target_case = str(target["case_id"])
+        source_image_path = Path(target["image_path"])
+        raw_label_path = target.get("label_path")
+        source_label_path = Path(raw_label_path) if raw_label_path is not None else None
         original_image, ras_image, source_image = load_ras_with_source(source_image_path)
-        original_label, _, source_label = load_ras_with_source(
-            source_label_path, label=True
-        )
+        if source_label_path is None:
+            original_label = np.zeros(original_image.shape, dtype=np.int16)
+            source_label = source_image
+        else:
+            original_label, _, source_label = load_ras_with_source(
+                source_label_path, label=True
+            )
         if original_image.shape != original_label.shape:
             raise ValueError(f"{target_case}: image and label shapes differ")
         fastsurfer_segmentation = _fastsurfer_segmentation_path(data_cfg, target_case)
@@ -314,6 +377,8 @@ def synthesize(config: dict[str, Any]) -> dict[str, Any]:
         metadata = {
             "sample_id": sample_id,
             "target_case": target_case,
+            "source_image": str(source_image_path),
+            "source_label": str(source_label_path) if source_label_path is not None else None,
             "requested_lesions": requested_per_case,
             "accepted_lesions": len(lesion_records),
             "complete": len(lesion_records) == requested_per_case,

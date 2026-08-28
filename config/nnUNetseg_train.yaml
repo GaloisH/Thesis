@@ -1,5 +1,6 @@
 # Usage: python src/segmentation/nnunet_train.py
 task_id: "002"
+experiment_name: "baseline_v1"
 config: "3d_fullres"
 trainer: "nnUNetTrainer_100epochs"
 folds: [0, 1, 2, 3, 4]
@@ -7,4 +8,4 @@ root_dir: "./datasets"
 wandb:
   enabled: true
   project: "nnUNet_Meningitis"
-  name_template: "Task{task_id}_{config}_fold{fold}_{timestamp}"
+  name_template: "{experiment_name}_fold{fold}_{timestamp}"

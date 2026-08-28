@@ -35,13 +35,19 @@ def main() -> None:
     root_dir = Path(config["root_dir"])
     if not root_dir.is_absolute():
         root_dir = PROJECT_ROOT / root_dir
+    results_dir = root_dir / "nnUNet_results" / config["experiment_name"]
+    if results_dir.exists():
+        raise FileExistsError(
+            f"Experiment already exists: {results_dir}. "
+            "Change experiment_name to start a new experiment."
+        )
 
     environment = os.environ.copy()
     environment.update(
         {
             "nnUNet_raw": str(root_dir / "nnUNet_raw"),
             "nnUNet_preprocessed": str(root_dir / "nnUNet_preprocessed"),
-            "nnUNet_results": str(root_dir / "nnUNet_results"),
+            "nnUNet_results": str(results_dir),
             "nnUNet_wandb_enabled": "1" if config["wandb"]["enabled"] else "0",
             "nnUNet_wandb_project": str(config["wandb"]["project"]),
         }
@@ -54,6 +60,7 @@ def main() -> None:
     for fold in config["folds"]:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         environment["WANDB_NAME"] = config["wandb"]["name_template"].format(
+            experiment_name=config["experiment_name"],
             task_id=config["task_id"],
             config=config["config"],
             fold=fold,
