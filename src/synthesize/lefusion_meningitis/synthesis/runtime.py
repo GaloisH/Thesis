@@ -1,3 +1,4 @@
+"""Provide interface for loading trained model and inference runtime."""
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,6 +1,6 @@
 """Lesion placement, sampling, quality control, and synthesis pipeline."""
 
-from .pipeline import synthesize
+from .pipeline import synthesize, synthesize_legacy, synthesize_target
 from .cortical_placement import (
     choose_cortical_candidate,
     compute_center_candidates,
@@ -8,7 +8,7 @@ from .cortical_placement import (
     placement_report,
     read_cortical_label_ids,
 )
-from .placement import roi_from_mask, transform_donor_mask
+from .placement import transform_donor_mask
 from .quality import qc_patch
 from .sampling import (
     brighten_lesion_interior,
@@ -26,9 +26,10 @@ __all__ = [
     "placement_report",
     "qc_patch",
     "read_cortical_label_ids",
-    "roi_from_mask",
     "sample_composite_patch",
     "sample_histogram",
     "synthesize",
+    "synthesize_legacy",
+    "synthesize_target",
     "transform_donor_mask",
 ]
