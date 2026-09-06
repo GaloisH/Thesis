@@ -52,7 +52,12 @@ def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> di
             "fastsurfer_lut",
         ),
         "training": ("output_dir", "resume"),
-        "synthesis": ("target", "checkpoint", "output_dir"),
+        "synthesis": (
+            "target",
+            "nnunet_splits_file",
+            "checkpoint",
+            "output_dir",
+        ),
         "visualization": ("output_dir",),
         "export": ("output_dataset",),
         "evaluation": ("output", "predictions_dir", "references_dir"),
