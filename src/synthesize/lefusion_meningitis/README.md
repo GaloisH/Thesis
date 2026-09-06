@@ -145,6 +145,23 @@ D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis `
 D:\python_code\miniconda\python.exe -m src.synthesize.lefusion_meningitis synthesize
 ```
 
+按 nnUNet 的 `splits_final.json` 合成指定 fold 的验证病例时，关闭外部目标目录并配置
+split 文件、fold 和目标划分：
+
+```yaml
+synthesis:
+  target: null
+  nnunet_splits_file: datasets/nnUNet_preprocessed/Dataset002_Meningitis/splits_final.json
+  fold: 0
+  split: val
+  output_dir: outputs/lefusion_meningitis/synthetic_fold0_val
+```
+
+`fold` 可设为 `0`–`4`，实际范围以 split 文件中的 fold 数量为准。每个 fold 必须使用
+独立的 `output_dir`；不同 fold 会包含同名病例，而合成流程会跳过输出已完整存在的病例。
+未配置 `nnunet_splits_file` 时，仍从 `data.prepared_dir/split.json` 选择目标。
+该选项只控制合成目标，不会改变 LeFusion 的训练供体、直方图库或 checkpoint。
+
 每个目标病例执行以下流程，并在同一个 RAS 空间状态中累计病灶：
 
 1. 从训练患者选择真实病灶掩膜并做轻度旋转、缩放；

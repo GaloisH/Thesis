@@ -60,9 +60,11 @@ training:
 
 synthesis:
   target: datasets/IXI-T1
+  nnunet_splits_file: null
+  fold: 0
   checkpoint: outputs/lefusion_meningitis/training/best.pt
   output_dir: outputs/lefusion_meningitis/synthetic
-  split: train
+  split: val
   num_per_case: 10
   histogram_jitter: 0.02
   brightness_margin: 0.1

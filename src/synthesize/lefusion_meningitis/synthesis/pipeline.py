@@ -87,6 +87,86 @@ def _discover_external_targets(target_dir: str | Path) -> list[dict[str, Any]]:
     return targets
 
 
+def _read_nnunet_split_cases(
+    split_file: str | Path,
+    fold: int,
+    split_name: str,
+) -> list[str]:
+    """Read and validate one train/val case list from nnUNet splits_final.json."""
+    path = Path(split_file)
+    if not path.is_file():
+        raise FileNotFoundError(f"nnUNet split file not found: {path}")
+    splits = read_json(path)
+    if not isinstance(splits, list) or not splits:
+        raise ValueError(f"nnUNet split file must contain a non-empty fold list: {path}")
+    if fold < 0 or fold >= len(splits):
+        raise ValueError(
+            f"nnUNet fold {fold} is out of range for {path}; "
+            f"available folds: 0-{len(splits) - 1}"
+        )
+    if split_name not in ("train", "val"):
+        raise ValueError(f"nnUNet synthesis split must be 'train' or 'val': {split_name}")
+
+    fold_data = splits[fold]
+    if not isinstance(fold_data, dict):
+        raise ValueError(f"nnUNet fold {fold} must be an object: {path}")
+    for name in ("train", "val"):
+        cases = fold_data.get(name)
+        if not isinstance(cases, list) or not all(
+            isinstance(case_id, str) and case_id for case_id in cases
+        ):
+            raise ValueError(
+                f"nnUNet fold {fold} must contain a valid {name} case list: {path}"
+            )
+        if len(cases) != len(set(cases)):
+            raise ValueError(f"nnUNet fold {fold} contains duplicate {name} cases: {path}")
+    overlap = set(fold_data["train"]) & set(fold_data["val"])
+    if overlap:
+        raise ValueError(f"nnUNet fold {fold} train/val cases overlap: {path}")
+
+    selected = list(fold_data[split_name])
+    if not selected:
+        raise ValueError(f"nnUNet fold {fold} {split_name} case list is empty: {path}")
+    return selected
+
+
+def _resolve_split_target_cases(synthesis_cfg, prepared_split, prepared_dir: Path):
+    """Resolve target case IDs and provenance from nnUNet or the prepared split."""
+    split_name = str(synthesis_cfg.get("split", "train"))
+    nnunet_splits_file = synthesis_cfg.get("nnunet_splits_file")
+    if nnunet_splits_file:
+        fold = int(synthesis_cfg.get("fold", 0))
+        cases = _read_nnunet_split_cases(nnunet_splits_file, fold, split_name)
+        return cases, {
+            "source": "nnunet",
+            "split_file": str(nnunet_splits_file),
+            "fold": fold,
+            "split": split_name,
+        }
+    if split_name not in prepared_split["cases"]:
+        raise ValueError(f"unknown synthesis split: {split_name}")
+    return list(prepared_split["cases"][split_name]), {
+        "source": "prepared",
+        "split_file": str(prepared_dir / "split.json"),
+        "fold": None,
+        "split": split_name,
+    }
+
+
+def _synthetic_sample_exists(output_dir: str | Path, sample_id: str) -> bool:
+    """Return whether all four outputs for a synthetic sample already exist."""
+    output_dir = Path(output_dir)
+    return all(
+        path.is_file()
+        for path in (
+            output_dir / "images" / f"{sample_id}_0000.nii.gz",
+            output_dir / "labels" / f"{sample_id}.nii.gz",
+            output_dir / "masks" / f"{sample_id}.nii.gz",
+            output_dir / "metadata" / f"{sample_id}.json",
+        )
+    )
+
+
 def synthesize(config: dict[str, Any]) -> dict[str, Any]:
     """Dispatch to external-directory or legacy split-backed synthesis."""
     if config["synthesis"].get("target"):
@@ -143,10 +223,11 @@ def _synthesize_cases(
     if not train_entries:
         raise RuntimeError("training manifest contains no donor lesions")
     max_patch_shape = _max_donor_patch_shape(train_entries, prepared_dir)
+    target_selection: dict[str, Any]
     if external_targets is None:
-        target_split = str(synthesis_cfg.get("split", "train"))
-        if target_split not in split["cases"]:
-            raise ValueError(f"unknown synthesis split: {target_split}")
+        target_cases, target_selection = _resolve_split_target_cases(
+            synthesis_cfg, split, prepared_dir
+        )
         targets = [
             {
                 "case_id": case_id,
@@ -155,10 +236,16 @@ def _synthesize_cases(
                 ),
                 "label_path": label_path(data_cfg["source_dataset"], case_id),
             }
-            for case_id in split["cases"][target_split]
+            for case_id in target_cases
         ]
     else:
         targets = list(external_targets)
+        target_selection = {
+            "source": "external",
+            "split_file": None,
+            "fold": None,
+            "split": None,
+        }
     model, checkpoint, device, histogram_library = load_inference_runtime(config)
     label_id = int(data_cfg["label_id"])
     base_seed = int(config["seed"])
@@ -171,6 +258,11 @@ def _synthesize_cases(
         tqdm(targets, desc="Synthesizing", unit="case")
     ):
         target_case = str(target["case_id"])
+        sample_id = f"{target_case}_syn"
+        if _synthetic_sample_exists(output_dir, sample_id):
+            logger.info("%s: synthetic outputs already exist, skipping", target_case)
+            records.append(read_json(metadata_dir / f"{sample_id}.json"))
+            continue
         source_image_path = Path(target["image_path"])
         raw_label_path = target.get("label_path")
         source_label_path = Path(raw_label_path) if raw_label_path is not None else None
@@ -360,7 +452,6 @@ def _synthesize_cases(
             )
             continue
 
-        sample_id = f"{target_case}_syn"
         image_output = images_dir / f"{sample_id}_0000.nii.gz"
         label_output = labels_dir / f"{sample_id}.nii.gz"
         mask_output = masks_dir / f"{sample_id}.nii.gz"
@@ -390,6 +481,7 @@ def _synthesize_cases(
             "checkpoint_step": int(checkpoint.get("global_step", -1)),
             "manifest_hash": manifest["hash"],
             "split_hash": split["hash"],
+            "target_selection": target_selection,
             "qc": aggregate_case_qc(lesion_records, background_exact),
             "outputs": {
                 "image": str(image_output),
